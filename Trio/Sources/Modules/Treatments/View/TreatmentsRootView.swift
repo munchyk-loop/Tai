@@ -492,8 +492,7 @@ extension Treatments {
         }
 
         var treatmentButton: some View {
-            let shouldDisplayBolusProgress = state.isBolusInProgress &&
-                !state.externalInsulin && (state.carbs == 0 || state.fat == 0 || state.protein == 0)
+            let shouldDisplayBolusProgress = bolusInProgressForEntry
 
             var treatmentButtonBackground = Color(.systemBlue)
             if limitExceeded {
@@ -568,6 +567,7 @@ extension Treatments {
                     + (bolusProgressFormatter.string(from: bolusTotal as NSNumber) ?? "0")
                     + String(localized: " U", comment: "Insulin unit")
             }()
+            let bolusLabel = state.bolusStatus == .inProgress ? String(localized: "Bolusing") : String(localized: "Initiating…")
 
             ZStack {
                 // background card
@@ -598,7 +598,7 @@ extension Treatments {
                     Spacer()
 
                     Group {
-                        Text("Bolusing")
+                        Text(bolusLabel)
                             .font(.subheadline)
                         Text(bolusString)
                             .font(.subheadline)
@@ -607,13 +607,17 @@ extension Treatments {
 
                     Spacer()
 
-                    Button { state.cancelBolus() } label: {
-                        Image(systemName: "xmark.app")
-                            .font(.system(size: 25))
-                            .foregroundStyle(Color.primary, Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902))
+                    if state.bolusStatus == .inProgress {
+                        Button { state.cancelBolus() } label: {
+                            Image(systemName: "xmark.app")
+                                .font(.system(size: 25))
+                                .foregroundStyle(Color.primary, Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902))
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Cancel bolus")
+                    } else if state.bolusStatus == .initiating {
+                        ProgressView()
                     }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Cancel bolus")
                 }
                 .padding(.horizontal, 10)
             }
@@ -691,12 +695,14 @@ extension Treatments {
             pumpBolusLimitExceeded || externalBolusLimitExceeded || carbLimitExceeded || fatLimitExceeded || proteinLimitExceeded
         }
 
+        private var bolusInProgressForEntry: Bool {
+            // .initiating covers pumps that take a few seconds before reporting progress
+            (state.bolusProgress != nil || state.bolusStatus == .initiating) &&
+                state.amount > 0 && !state.externalInsulin
+        }
+
         private var disableTaskButton: Bool {
-            (
-                state.isBolusInProgress && state
-                    .amount > 0 && !state.externalInsulin && (state.carbs == 0 || state.fat == 0 || state.protein == 0)
-            ) || state
-                .addButtonPressed || limitExceeded
+            bolusInProgressForEntry || state.addButtonPressed || limitExceeded
         }
     }
 

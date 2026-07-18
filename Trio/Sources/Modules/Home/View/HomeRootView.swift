@@ -187,10 +187,11 @@ extension Home {
                 currentGlucoseTarget: state.currentGlucoseTarget,
                 glucoseColorScheme: state.glucoseColorScheme,
                 glucose: state.latestTwoGlucoseValues,
-                cgmProgress: state.cgmProgressHighlight,
-                cgmStatus: state.cgmDisplayState,
-                cgmSensorExpiresAt: state.cgmSensorExpiresAt,
-                cgmWarmupEndsAt: state.cgmWarmupEndsAt
+
+                cgmProgress: state.showCgmSensorStatus ? state.cgmProgressHighlight : nil,
+                cgmStatus: state.showCgmSensorStatus ? state.cgmDisplayState : nil,
+                cgmSensorExpiresAt: state.showCgmSensorStatus ? state.cgmSensorExpiresAt : nil,
+                cgmWarmupEndsAt: state.showCgmSensorStatus ? state.cgmWarmupEndsAt : nil
             )
             .onTapGesture {
                 if !state.cgmAvailable {
@@ -1125,6 +1126,8 @@ extension Home {
                         + String(localized: " of ", comment: "Bolus string partial message: 'x U of y U' in home view") +
                         (bolusProgressFormatter.string(from: bolusTotal as NSNumber) ?? "0")
                         + String(localized: " U", comment: "Insulin unit")
+                let bolusLabel = state
+                    .bolusStatus == .inProgress ? String(localized: "Bolusing") : String(localized: "Initiating…")
 
                 ZStack {
                     /// rectangle as background
@@ -1156,7 +1159,7 @@ extension Home {
 
                         Spacer()
                         Group {
-                            Text("Bolusing")
+                            Text(bolusLabel)
                                 .font(.subheadline)
                             Text(bolusString)
                                 .font(.subheadline)
@@ -1164,13 +1167,20 @@ extension Home {
 
                         Spacer()
 
-                        Button {
-                            state.showProgressView()
-                            state.cancelBolus()
-                        } label: {
-                            Image(systemName: "xmark.app")
-                                .font(.system(size: 25))
-                                .foregroundStyle(Color.primary, Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902))
+                        if state.bolusStatus == .inProgress {
+                            Button {
+                                state.showProgressView()
+                                state.cancelBolus()
+                            } label: {
+                                Image(systemName: "xmark.app")
+                                    .font(.system(size: 25))
+                                    .foregroundStyle(
+                                        Color.primary,
+                                        Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
+                                    )
+                            }
+                        } else if state.bolusStatus == .initiating {
+                            ProgressView()
                         }
                     }.padding(.horizontal, 10)
                 }
