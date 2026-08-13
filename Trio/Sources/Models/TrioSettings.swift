@@ -19,6 +19,7 @@ enum GlucoseSmoothingAlgorithm: String, JSON, CaseIterable, Identifiable {
     var id: String { rawValue }
     case exponential
     case ukf
+    case adaptiveUkf
 
     var displayName: String {
         switch self {
@@ -26,6 +27,8 @@ enum GlucoseSmoothingAlgorithm: String, JSON, CaseIterable, Identifiable {
             return String(localized: "2nd Order Exponential", comment: "Exponential smoothing algorithm display name")
         case .ukf:
             return String(localized: "Unscented Kalman Filter", comment: "UKF smoothing algorithm display name")
+        case .adaptiveUkf:
+            return String(localized: "Adaptive UKF Smoothing", comment: "Adaptive UKF smoothing algorithm display name")
         }
     }
 }
@@ -65,6 +68,7 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var allowDilution: Bool = false
     var insulinConcentration: Decimal = 1
     var showCobIobChart: Bool = true
+    var homeStatsPanelFace: HomeStatsPanelFace = .timeInRange
     var rulerMarks: Bool = true
     var bolusDisplayThreshold: BolusDisplayThreshold = .allUnits
     var forecastDisplayType: ForecastDisplayType = .cone
@@ -72,6 +76,7 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var maxFat: Decimal = 250
     var maxProtein: Decimal = 250
     var confirmBolusFaster: Bool = false
+    var showForecastWatch: Bool = false
     var overrideFactor: Decimal = 0.8
     var fattyMeals: Bool = false
     var fattyMealFactor: Decimal = 0.7
@@ -79,7 +84,7 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var sweetMealFactor: Decimal = 1
     var displayPresets: Bool = true
     var confirmBolus: Bool = false
-    var enableQuickBolus: Bool = false
+    var enableQuickPickTreatments: Bool = false
     var useLiveActivity: Bool = false
     var lockScreenView: LockScreenView = .simple
     var smartStackView: LockScreenView = .simple
@@ -93,7 +98,10 @@ struct TrioSettings: JSON, Equatable, Encodable {
 
     /// Selected Garmin watchface (Trio or SwissAlpine)
     var garminWatchface: GarminWatchface = .trio
-    var garminDatafield: GarminDatafield = .none
+
+    /// Selected Garmin datafields, in selection order. Empty means no datafield is used.
+    /// Replaces the single `garminDatafield` setting; see the decoder for the migration.
+    var garminDatafields: [GarminDatafield] = []
 
     /// Primary attribute choice for Garmin display (COB, ISF, or Sensitivity Ratio)
     var primaryAttributeChoice: GarminPrimaryAttributeChoice = .cob
@@ -104,31 +112,49 @@ struct TrioSettings: JSON, Equatable, Encodable {
     /// Controls whether watchface data transmission is enabled
     var isWatchfaceDataEnabled: Bool = false
 
-    /// When enabled, automatically switches between watchface and datafield based on activity detection.
-    /// When disabled, broadcasts to all configured apps simultaneously.
-    var smartGarminMessageSwitching: Bool = true
-
     /// Computed property that groups all Garmin settings into a single struct
     var garminSettings: GarminWatchSettings {
         get {
             GarminWatchSettings(
                 watchface: garminWatchface,
-                datafield: garminDatafield,
+                datafields: garminDatafields,
                 primaryAttributeChoice: primaryAttributeChoice,
                 secondaryAttributeChoice: secondaryAttributeChoice,
-                isWatchfaceDataEnabled: isWatchfaceDataEnabled,
-                smartGarminMessageSwitching: smartGarminMessageSwitching
+                isWatchfaceDataEnabled: isWatchfaceDataEnabled
             )
         }
         set {
             garminWatchface = newValue.watchface
-            garminDatafield = newValue.datafield
+            garminDatafields = newValue.datafields
             primaryAttributeChoice = newValue.primaryAttributeChoice
             secondaryAttributeChoice = newValue.secondaryAttributeChoice
             isWatchfaceDataEnabled = newValue.isWatchfaceDataEnabled
-            smartGarminMessageSwitching = newValue.smartGarminMessageSwitching
         }
     }
+}
+
+/// Keys that are no longer stored properties of `TrioSettings`, but still have to be read
+/// from settings files written by older versions.
+private enum LegacyGarminCodingKeys: String, CodingKey {
+    /// Superseded by `garminDatafields`, which holds multiple datafields
+    case garminDatafield
+}
+
+/// Used to decode settings keys that no longer have a matching stored property (e.g. renamed keys kept for migration).
+private struct LegacyCodingKey: CodingKey {
+    let stringValue: String
+    init(stringValue: String) { self.stringValue = stringValue }
+    var intValue: Int? { nil }
+    init?(intValue _: Int) { nil }
+}
+
+/// The established pattern for migrating a renamed `TrioSettings` key: add the new property with its
+/// default value, decode the new key first, and fall back to this for the old key's persisted value so
+/// existing users keep their setting under the new name. Reuse this (rather than hand-rolling a legacy
+/// container) for any future `TrioSettings` key rename.
+private func decodeLegacyBool(from decoder: Decoder, legacyKey: String) -> Bool? {
+    guard let legacyContainer = try? decoder.container(keyedBy: LegacyCodingKey.self) else { return nil }
+    return try? legacyContainer.decode(Bool.self, forKey: LegacyCodingKey(stringValue: legacyKey))
 }
 
 extension TrioSettings: Decodable {
@@ -277,6 +303,10 @@ extension TrioSettings: Decodable {
             settings.showCobIobChart = showCobIobChart
         }
 
+        if let homeStatsPanelFace = try? container.decode(HomeStatsPanelFace.self, forKey: .homeStatsPanelFace) {
+            settings.homeStatsPanelFace = homeStatsPanelFace
+        }
+
         if let hideInsulinBadge = try? container.decode(Bool.self, forKey: .hideInsulinBadge) {
             settings.hideInsulinBadge = hideInsulinBadge
         }
@@ -321,6 +351,10 @@ extension TrioSettings: Decodable {
             settings.confirmBolusFaster = confirmBolusFaster
         }
 
+        if let showForecastWatch = try? container.decode(Bool.self, forKey: .showForecastWatch) {
+            settings.showForecastWatch = showForecastWatch
+        }
+
         if let displayPresets = try? container.decode(Bool.self, forKey: .displayPresets) {
             settings.displayPresets = displayPresets
         }
@@ -329,8 +363,11 @@ extension TrioSettings: Decodable {
             settings.confirmBolus = confirmBolus
         }
 
-        if let enableQuickBolus = try? container.decode(Bool.self, forKey: .enableQuickBolus) {
-            settings.enableQuickBolus = enableQuickBolus
+        if let enableQuickPickTreatments = try? container.decode(Bool.self, forKey: .enableQuickPickTreatments) {
+            settings.enableQuickPickTreatments = enableQuickPickTreatments
+        } else if let legacyValue = decodeLegacyBool(from: decoder, legacyKey: "enableQuickBolus") {
+            // Migrate the pre-rename "enableQuickBolus" key so existing users keep their opt-in.
+            settings.enableQuickPickTreatments = legacyValue
         }
 
         if let useLiveActivity = try? container.decode(Bool.self, forKey: .useLiveActivity) {
@@ -377,8 +414,13 @@ extension TrioSettings: Decodable {
             settings.garminWatchface = garminWatchface
         }
 
-        if let garminDatafield = try? container.decode(GarminDatafield.self, forKey: .garminDatafield) {
-            settings.garminDatafield = garminDatafield
+        if let garminDatafields = try? container.decode([GarminDatafield].self, forKey: .garminDatafields) {
+            settings.garminDatafields = GarminDatafield.sanitizedSelection(garminDatafields)
+        } else if let legacyContainer = try? decoder.container(keyedBy: LegacyGarminCodingKeys.self),
+                  let garminDatafield = try? legacyContainer.decode(GarminDatafield.self, forKey: .garminDatafield)
+        {
+            // Settings written before multiple datafields were supported stored a single choice
+            settings.garminDatafields = garminDatafield == .none ? [] : [garminDatafield]
         }
 
         if let primaryAttributeChoice = try? container
@@ -396,10 +438,6 @@ extension TrioSettings: Decodable {
 
         if let isWatchfaceDataEnabled = try? container.decode(Bool.self, forKey: .isWatchfaceDataEnabled) {
             settings.isWatchfaceDataEnabled = isWatchfaceDataEnabled
-        }
-
-        if let smartGarminMessageSwitching = try? container.decode(Bool.self, forKey: .smartGarminMessageSwitching) {
-            settings.smartGarminMessageSwitching = smartGarminMessageSwitching
         }
 
         self = settings

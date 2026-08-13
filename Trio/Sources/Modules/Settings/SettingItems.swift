@@ -261,7 +261,7 @@ enum SettingItems {
         ),
         SettingItem(
             title: "AIMI B30",
-            view: .B30Conf,
+            view: .b30Settings,
             searchContents: [
                 "Eating Soon",
                 "Activate B30 EatingSoon",
@@ -276,7 +276,7 @@ enum SettingItems {
         ),
         SettingItem(
             title: "Keto Protection",
-            view: .KetoConfig,
+            view: .ketoProtectSettings,
             searchContents: [
                 "Acidosis",
                 "Activate KetoProtection",
@@ -320,10 +320,10 @@ enum SettingItems {
             path: ["Features", "Treatments", "Bolus Calculator"]
         ),
         SettingItem(
-            title: "Quick-Pick Boluses",
-            view: .quickBolusConfig,
-            searchContents: ["Enable Quick-Pick Boluses"],
-            path: ["Features", "Treatments", "Quick-Pick Boluses"]
+            title: "Quick-Pick Treatments",
+            view: .quickPickTreatmentsConfig,
+            searchContents: ["Enable Quick-Pick Treatments"],
+            path: ["Features", "Treatments", "Quick-Pick Treatments"]
         ),
         SettingItem(
             title: "Meal Settings",

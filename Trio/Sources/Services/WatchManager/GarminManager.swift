@@ -54,6 +54,9 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
     /// Stores, retrieves, and updates insulin dose determinations in CoreData.
     @Injected() private var determinationStorage: DeterminationStorage!
 
+    /// JSON settings store, used here to read the glucose target profile.
+    @Injected() private var fileStorage: FileStorage!
+
     @Injected() private var iobService: IOBService!
     @Injected() private var trioAlertManager: TrioAlertManager!
 
@@ -80,6 +83,10 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
 
     /// Current glucose units, either mg/dL or mmol/L, read from user settings.
     private var units: GlucoseUnits = .mgdL
+
+    /// Glucose color scheme, read from user settings and forwarded to watch apps
+    /// that can color glucose themselves.
+    private var glucoseColorScheme: GlucoseColorScheme = .staticColor
 
     // MARK: - Debug Logging
 
@@ -190,9 +197,13 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
         subscribeToWatchState()
 
         units = settingsManager.settings.units
+        glucoseColorScheme = settingsManager.settings.glucoseColorScheme
         previousGarminSettings = settingsManager.settings.garminSettings
 
         broadcaster.register(SettingsObserver.self, observer: self)
+        // Glucose targets are not part of TrioSettings, so editing the target profile
+        // notifies this observer rather than firing settingsDidChange.
+        broadcaster.register(BGTargetsObserver.self, observer: self)
 
         coreDataPublisher =
             CoreDataStack.shared.entityChangePublisher
@@ -229,9 +240,15 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
         settingsManager.settings.garminSettings.watchface
     }
 
-    /// Returns the currently configured Garmin datafield from settings
-    private var currentDatafield: GarminDatafield {
-        settingsManager.settings.garminSettings.datafield
+    /// Returns the currently configured Garmin datafields from settings.
+    /// Empty when the user has not selected any datafield.
+    private var currentDatafields: [GarminDatafield] {
+        settingsManager.settings.garminSettings.datafields
+    }
+
+    /// Returns the configured datafield registered under the given app UUID, if any
+    private func datafield(for uuid: UUID) -> GarminDatafield? {
+        currentDatafields.first { $0.datafieldUUID == uuid }
     }
 
     /// Returns whether watchface data transmission is enabled in settings
@@ -239,10 +256,20 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
         settingsManager.settings.garminSettings.isWatchfaceDataEnabled
     }
 
-    /// SwissAlpine watchface uses historical glucose data (24 entries)
-    /// Trio watchface only uses current reading
+    /// SwissAlpine watchface, the Loop Graph datafield and the complication app use
+    /// historical glucose data (24 entries). Trio watchface only uses current reading.
+    ///
+    /// The complication app needs it for the 2 h graph in its own view; the complications
+    /// it publishes read only element 0 and work without history.
+    ///
+    /// Note: the payload is built once and broadcast to every registered app, so enabling
+    /// this for either app also sends the full array to the other. Both the Trio watchface
+    /// and the Trio datafield read only element 0 and ignore the rest, and SwissAlpine caps
+    /// at 24 entries — so 24 is the maximum that is safe to send here.
     private var needsHistoricalGlucoseData: Bool {
         currentWatchface == .swissalpine
+            || currentWatchface == .complication
+            || currentDatafields.contains(.loopgraph)
     }
 
     /// Returns the display name for an app UUID (watchface or datafield).
@@ -250,8 +277,8 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
     private func appDisplayName(for uuid: UUID) -> String {
         if uuid == currentWatchface.watchfaceUUID {
             return "watchface:\(currentWatchface.displayName)"
-        } else if uuid == currentDatafield.datafieldUUID {
-            return "datafield:\(currentDatafield.displayName)"
+        } else if let datafield = datafield(for: uuid) {
+            return "datafield:\(datafield.displayName)"
         } else {
             return "unknown app"
         }
@@ -263,8 +290,8 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
     private func appDetailedName(for uuid: UUID) -> String {
         if uuid == currentWatchface.watchfaceUUID {
             return "watchface:\(currentWatchface.displayName) (\(uuid.uuidString))"
-        } else if uuid == currentDatafield.datafieldUUID {
-            return "datafield:\(currentDatafield.displayName) (\(uuid.uuidString))"
+        } else if let datafield = datafield(for: uuid) {
+            return "datafield:\(datafield.displayName) (\(uuid.uuidString))"
         } else {
             return "unknown app (\(uuid.uuidString))"
         }
@@ -550,12 +577,21 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
 
         let tempBasalIds = try await fetchTempBasals()
 
+        // Scheduled profile target only, matching the Home chart -- overrides and temp
+        // targets are not reflected.
+        let bgTargets = await fileStorage.retrieveAsync(OpenAPS.Settings.bgTargets, as: BGTargets.self)
+            ?? BGTargets(from: OpenAPS.defaults(for: OpenAPS.Settings.bgTargets))
+            ?? BGTargets(units: .mgdL, userPreferredUnits: .mgdL, targets: [])
+        let targetGlucoseValue = bgTargets.currentTarget().map { Int16(truncating: $0 as NSDecimalNumber) }
+
         // Extract all needed values from self before entering perform block (Sendable compliance)
         let unitsValue = units
         let iobValue = formatIOB(iobService.currentIOB ?? Decimal(0))
         let basalProfile = settingsManager.preferences.basalProfile as? [BasalProfileEntry] ?? []
         let displayPrimaryChoice = settingsManager.settings.garminSettings.primaryAttributeChoice.rawValue
         let displaySecondaryChoice = settingsManager.settings.garminSettings.secondaryAttributeChoice.rawValue
+        // Short form, not the enum raw value: this is the wire format the watchface reads.
+        let colorSchemeValue = glucoseColorScheme == .dynamicColor ? "dynamic" : "static"
         let needsHistoricalData = needsHistoricalGlucoseData
         let shouldDebug = debugWatchState
         let previousHash = lastPreparedDataHash
@@ -592,9 +628,15 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
             if let latestDetermination = allDeterminationObjects.first {
                 cobValue = Double(latestDetermination.cob)
 
-                if let ratio = latestDetermination.sensitivityRatio {
-                    sensRatioValue = Double(truncating: ratio)
-                }
+                // Tai sends the AutoISF ratio - the "final" factor from the autoISF
+                // calculations screen, the same number the home header shows as
+                // aiSR. NOT sensitivityRatio, which carries only the autosens
+                // value and sits at 1.0 while AutoISF does the adjusting.
+                //
+                // Upstream Trio has no AutoISF, so it reads sensitivityRatio here;
+                // that upstream form arrived with the updateGarmin rewrite and
+                // left every Garmin app showing 1.0.
+                sensRatioValue = Double(truncating: latestDetermination.autoISFratio ?? 1)
 
                 if let isf = latestDetermination.insulinSensitivity {
                     isfValue = Int16(truncating: isf)
@@ -672,6 +714,8 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
                     watchState.sensRatio = sensRatioValue
                     watchState.displayPrimaryAttributeChoice = displayPrimaryChoice
                     watchState.displaySecondaryAttributeChoice = displaySecondaryChoice
+                    watchState.glucoseColorScheme = colorSchemeValue
+                    watchState.targetGlucose = targetGlucoseValue
                 }
 
                 watchStates.append(watchState)
@@ -691,9 +735,10 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
                 let cobFormatted = String(format: "%.0f", watchStates.first?.cob ?? 0)
                 let tbrFormatted = String(format: "%.2f", watchStates.first?.tbr ?? 0)
                 let sensRatioFormatted = String(format: "%.2f", watchStates.first?.sensRatio ?? 0)
+                let targetFormatted = watchStates.first?.targetGlucose.map { "\($0)" } ?? "none"
                 debug(
                     .watchManager,
-                    "Garmin: Prepared \(watchStates.count) entries - sgv: \(watchStates.first?.sgv ?? 0), iob: \(iobFormatted), cob: \(cobFormatted), tbr: \(tbrFormatted), eventualBG: \(watchStates.first?.eventualBG ?? 0), sensRatio: \(sensRatioFormatted)"
+                    "Garmin: Prepared \(watchStates.count) entries - sgv: \(watchStates.first?.sgv ?? 0), iob: \(iobFormatted), cob: \(cobFormatted), tbr: \(tbrFormatted), eventualBG: \(watchStates.first?.eventualBG ?? 0), sensRatio: \(sensRatioFormatted), colorScheme: \(watchStates.first?.glucoseColorScheme ?? "none"), target: \(targetFormatted)"
                 )
             }
 
@@ -750,10 +795,12 @@ final class BaseGarminManager: NSObject, GarminManager, Injectable {
                 debugGarmin("Garmin: Watchface data disabled - skipping watchface registration")
             }
 
-            // Always register datafield (if configured)
-            if let datafieldUUID = currentDatafield.datafieldUUID,
-               let datafieldApp = IQApp(uuid: datafieldUUID, store: UUID(), device: device)
-            {
+            // Always register every configured datafield - all of them receive the same payload
+            for datafield in currentDatafields {
+                guard let datafieldUUID = datafield.datafieldUUID,
+                      let datafieldApp = IQApp(uuid: datafieldUUID, store: UUID(), device: device)
+                else { continue }
+
                 debugGarmin("Garmin: Registered \(appDetailedName(for: datafieldUUID))")
                 watchApps.append(datafieldApp)
                 connectIQ?.register(forAppMessages: datafieldApp, delegate: self)
@@ -1067,11 +1114,13 @@ extension BaseGarminManager: SettingsObserver {
     func settingsDidChange(_: TrioSettings) {
         let currentGarminSettings = settingsManager.settings.garminSettings
         let currentUnits = settingsManager.settings.units
+        let currentColorScheme = settingsManager.settings.glucoseColorScheme
 
         // Detect what specifically changed
         let unitsChanged = currentUnits != units
+        let colorSchemeChanged = currentColorScheme != glucoseColorScheme
         let watchfaceChanged = currentGarminSettings.watchface != previousGarminSettings.watchface
-        let datafieldChanged = currentGarminSettings.datafield != previousGarminSettings.datafield
+        let datafieldChanged = currentGarminSettings.datafields != previousGarminSettings.datafields
         let watchfaceDataEnabledChanged = currentGarminSettings.isWatchfaceDataEnabled != previousGarminSettings
             .isWatchfaceDataEnabled
         let displayAttributesChanged = currentGarminSettings.primaryAttributeChoice != previousGarminSettings
@@ -1080,6 +1129,7 @@ extension BaseGarminManager: SettingsObserver {
 
         // Update stored values
         units = currentUnits
+        glucoseColorScheme = currentColorScheme
 
         // Re-register devices only if watchface/datafield configuration changed
         if watchfaceChanged || datafieldChanged || watchfaceDataEnabledChanged {
@@ -1100,7 +1150,7 @@ extension BaseGarminManager: SettingsObserver {
                 debug(.watchManager, "Garmin: Watchface data enabled - sending update immediately")
             }
             triggerWatchStateUpdate(triggeredBy: "Settings")
-        } else if unitsChanged || displayAttributesChanged {
+        } else if unitsChanged || displayAttributesChanged || colorSchemeChanged {
             // Throttle other settings changes in case user makes multiple changes
             if debugWatchState {
                 debug(.watchManager, "Garmin: Settings changed - scheduling throttled update")
@@ -1110,5 +1160,16 @@ extension BaseGarminManager: SettingsObserver {
 
         // Store current Garmin settings for next comparison
         previousGarminSettings = currentGarminSettings
+    }
+}
+
+extension BaseGarminManager: BGTargetsObserver {
+    /// Called when the glucose target profile is edited.
+    /// - Parameter _: The updated targets, re-read from storage during preparation.
+    func bgTargetsDidChange(_: BGTargets) {
+        if debugWatchState {
+            debug(.watchManager, "Garmin: Glucose targets changed - scheduling throttled update")
+        }
+        sendSettingsUpdateThrottled()
     }
 }

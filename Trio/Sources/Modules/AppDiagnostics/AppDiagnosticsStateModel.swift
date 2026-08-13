@@ -1,4 +1,3 @@
-import FirebaseCrashlytics
 import Observation
 import SwiftUI
 
@@ -16,8 +15,8 @@ extension AppDiagnostics {
         /// streams are enabled by default (`nil` ⇒ on), so an untouched
         /// install surfaces `.full` until the user opts out here.
         func loadDiagnostics() {
-            let crashlytics = PropertyPersistentFlags.shared.diagnosticsSharingEnabled ?? true
-            let telemetry = PropertyPersistentFlags.shared.telemetryEnabled ?? true
+            let crashlytics = PropertyPersistentFlags.shared.crashlyticsSharingEnabled ?? true
+            let telemetry = PropertyPersistentFlags.shared.telemetrySharingEnabled ?? true
             diagnosticsSharingOption = DiagnosticsSharingOption(
                 crashlyticsEnabled: crashlytics,
                 telemetryEnabled: telemetry
@@ -27,11 +26,14 @@ extension AppDiagnostics {
         /// Persists the current diagnostics sharing option to both underlying flags
         /// and applies it to Crashlytics + the telemetry sender.
         func applyDiagnostics() {
-            let wasTelemetryOn = PropertyPersistentFlags.shared.telemetryEnabled != false
+            let wasTelemetryOn = PropertyPersistentFlags.shared.telemetrySharingEnabled != false
 
-            PropertyPersistentFlags.shared.diagnosticsSharingEnabled = diagnosticsSharingOption.crashlyticsEnabled
-            PropertyPersistentFlags.shared.telemetryEnabled = diagnosticsSharingOption.telemetryEnabled
-            Crashlytics.crashlytics().setCrashlyticsCollectionEnabled(diagnosticsSharingOption.crashlyticsEnabled)
+            PropertyPersistentFlags.shared.crashlyticsSharingEnabled = diagnosticsSharingOption.crashlyticsEnabled
+            PropertyPersistentFlags.shared.telemetrySharingEnabled = diagnosticsSharingOption.telemetryEnabled
+
+            // Opting out also drops whatever GoogleDataTransport already queued,
+            // so no crash-reporting upload survives the switch.
+            CrashReportingGate.setEnabled(diagnosticsSharingOption.crashlyticsEnabled)
 
             // Fire an inaugural send on a fresh re-opt-in so the first data
             // point arrives immediately rather than 24h later.
@@ -50,8 +52,8 @@ extension AppDiagnostics.StateModel: SettingsObserver {
 /// Three-state diagnostics-sharing selection.
 ///
 /// Maps to a pair of independent `Bool?` flags in `PropertyPersistentFlags`:
-/// `diagnosticsSharingEnabled` (Crashlytics) and `telemetryEnabled` (the
-/// anonymous-usage POST). See `TelemetryClient`.
+/// `crashlyticsSharingEnabled` (Crashlytics) and `telemetrySharingEnabled`
+/// (the anonymous-usage POST). See `TelemetryClient`.
 enum DiagnosticsSharingOption: String, Equatable, CaseIterable, Identifiable {
     case full
     case crashOnly

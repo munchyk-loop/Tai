@@ -31,7 +31,7 @@ enum Screen: Identifiable, Hashable {
     case watch
     case userInterfaceSettings
     case bolusCalculatorConfig
-    case quickBolusConfig
+    case quickPickTreatmentsConfig
     case dynamicISF
     case calibrations
     case shortcutsConfig
@@ -54,9 +54,9 @@ enum Screen: Identifiable, Hashable {
     case appDiagnostics
     case settingsExport
     case autoISFSettings
-    case B30Conf
-    case KetoConfig
-    case autoisfHistory
+    case b30Settings
+    case ketoProtectSettings
+    case autoISFHistory
     case insulinConcentration
     case adaptProfile
     case profileScheduler
@@ -138,8 +138,8 @@ extension Screen {
             UserInterfaceSettings.RootView(resolver: resolver)
         case .bolusCalculatorConfig:
             BolusCalculatorConfig.RootView(resolver: resolver)
-        case .quickBolusConfig:
-            QuickPickBolusesConfig.RootView(resolver: resolver)
+        case .quickPickTreatmentsConfig:
+            QuickPickTreatmentsConfig.RootView(resolver: resolver)
         case .dynamicISF:
             DynamicSettings.RootView(resolver: resolver)
         case .calibrations:
@@ -184,11 +184,11 @@ extension Screen {
             SettingsExport.RootView(resolver: resolver)
         case .autoISFSettings:
             AutoISFSettings.RootView(resolver: resolver)
-        case .B30Conf:
+        case .b30Settings:
             B30Settings.RootView(resolver: resolver)
-        case .KetoConfig:
+        case .ketoProtectSettings:
             KetoProtectSettings.RootView(resolver: resolver)
-        case .autoisfHistory:
+        case .autoISFHistory:
             AutoISFHistory.RootView(resolver: resolver)
         case .insulinConcentration:
             InsulinConcentration.RootView(resolver: resolver)

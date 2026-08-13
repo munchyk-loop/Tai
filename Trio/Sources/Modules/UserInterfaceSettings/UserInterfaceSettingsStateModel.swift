@@ -7,6 +7,7 @@ extension UserInterfaceSettings {
         @Published var xGridLines = false
         @Published var yGridLines: Bool = false
         @Published var showCobIobChart: Bool = true
+        @Published var homeStatsPanelFace: HomeStatsPanelFace = .timeInRange
         @Published var rulerMarks: Bool = true
         @Published var showGlucosePeaks: Bool = false
         @Published var useChartBars: Bool = true
@@ -19,6 +20,7 @@ extension UserInterfaceSettings {
         @Published var eA1cDisplayUnit: EstimatedA1cDisplayUnit = .percent
         @Published var timeInRangeType: TimeInRangeType = .timeInTightRange
         @Published var requireAdjustmentsConfirmation: Bool = false
+        @Published var currentGlucoseTarget: Decimal = 100
 
         var units: GlucoseUnits = .mgdL
 
@@ -29,6 +31,7 @@ extension UserInterfaceSettings {
             subscribeSetting(\.xGridLines, on: $xGridLines) { xGridLines = $0 }
             subscribeSetting(\.yGridLines, on: $yGridLines) { yGridLines = $0 }
             subscribeSetting(\.showCobIobChart, on: $showCobIobChart) { showCobIobChart = $0 }
+            subscribeSetting(\.homeStatsPanelFace, on: $homeStatsPanelFace) { homeStatsPanelFace = $0 }
             subscribeSetting(\.rulerMarks, on: $rulerMarks) { rulerMarks = $0 }
             subscribeSetting(\.showGlucosePeaks, on: $showGlucosePeaks) { showGlucosePeaks = $0 }
             subscribeSetting(\.useChartBars, on: $useChartBars) { useChartBars = $0 }
@@ -57,6 +60,16 @@ extension UserInterfaceSettings {
 
             subscribeSetting(\.requireAdjustmentsConfirmation, on: $requireAdjustmentsConfirmation) {
                 requireAdjustmentsConfirmation = $0 }
+
+            Task { await getCurrentGlucoseTarget() }
+        }
+
+        /// Resolves the glucose target active right now from the BG target schedule.
+        func getCurrentGlucoseTarget() async {
+            let bgTargets = await provider.getBGTargets()
+            if let target = bgTargets.currentTarget() {
+                await MainActor.run { currentGlucoseTarget = target }
+            }
         }
     }
 }

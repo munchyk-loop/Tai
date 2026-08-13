@@ -9,6 +9,7 @@ extension WatchConfig {
         @Published var units: GlucoseUnits = .mgdL
         @Published var devices: [IQDevice] = []
         @Published var confirmBolusFaster = false
+        @Published var showForecastWatch = false
 
         /// Garmin watch settings containing all watch-related configuration
         @Published var garminSettings = GarminWatchSettings()
@@ -22,6 +23,7 @@ extension WatchConfig {
             // Subscribe to the entire garminSettings struct from TrioSettings
             subscribeSetting(\.garminSettings, on: $garminSettings) { garminSettings = $0 }
             subscribeSetting(\.confirmBolusFaster, on: $confirmBolusFaster) { confirmBolusFaster = $0 }
+            subscribeSetting(\.showForecastWatch, on: $showForecastWatch) { showForecastWatch = $0 }
 
             devices = garmin.devices
         }
@@ -37,6 +39,17 @@ extension WatchConfig {
         /// Updates the Garmin manager with the current device list
         func deleteGarminDevice() {
             garmin.updateDeviceList(devices)
+        }
+
+        /// Adds or removes a datafield from the selection.
+        /// Additions beyond `GarminDatafield.maxSelectionCount` are ignored.
+        func toggleDatafield(_ datafield: GarminDatafield) {
+            garminSettings.toggleDatafield(datafield)
+        }
+
+        /// Whether the given datafield can still be added to the selection
+        func canSelectDatafield(_ datafield: GarminDatafield) -> Bool {
+            garminSettings.canSelectDatafield(datafield)
         }
 
         /// Handles watchface selection changes by automatically disabling data transmission
