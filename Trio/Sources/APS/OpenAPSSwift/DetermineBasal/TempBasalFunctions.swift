@@ -12,28 +12,21 @@ enum TempBasalFunctionError: LocalizedError, Equatable {
 }
 
 enum TempBasalFunctions {
-    /// Rounds basal rates to match the basal increment for the pump as the basal rate increases.
-    /// Mirrors JS `round-basal.js`: the low-rate scale derives from `profile.bolus_increment`
-    /// (`1 / bolus_increment`) with Medtronic x23/x54 forced to 40 (0.025 U).
+    /// Rounds basal rates to the increment the pump delivers in, in U100 units.
+    ///
+    /// Diverges from JS `round-basal.js`, which bands at 1 and 10 U/h using constants copied from a
+    /// Medtronic x23. Those boundaries are in pump units while the rate here is in U100 units, so
+    /// they only line up at U100, and the constants discard resolution on every pump with a flat
+    /// grid - a pod loses half its steps above 10 U/h, a Dana four fifths above 1. A banded pump is
+    /// handed a rate finer than it can hold instead, which `roundToSupportedBasalRate` floors when
+    /// the rate is converted back to pump volume for delivery.
     static func roundBasal(profile: Profile, basalRate: Decimal) -> Decimal {
-        var lowestRateScale: Decimal = 20
-        if profile.bolusIncrement > 0 {
-            lowestRateScale = 1 / profile.bolusIncrement
-        }
-        if let model = profile.model, model.hasSuffix("54") || model.hasSuffix("23") {
-            lowestRateScale = 40
+        var scale: Decimal = 20
+        if profile.basalIncrement > 0 {
+            scale = 1 / profile.basalIncrement
         }
 
-        let roundedBasal: Decimal
-        if basalRate < 1 {
-            roundedBasal = (basalRate * lowestRateScale).jsRounded() / lowestRateScale
-        } else if basalRate < 10 {
-            roundedBasal = (basalRate * 20).jsRounded() / 20
-        } else {
-            roundedBasal = (basalRate * 10).jsRounded() / 10
-        }
-
-        return roundedBasal
+        return (basalRate * scale).jsRounded() / scale
     }
 
     /// defines the max safe basal rate given a profile
