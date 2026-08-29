@@ -221,6 +221,7 @@ extension Home.RootView {
             hasOverride: overrideString != nil,
             hasTempTarget: tempTargetString != nil,
             hasTempProfile: activeProfile.first?.expiresAt != nil,
+            hasUnacknowledgedReleaseNotes: releaseNotesService.hasUnacknowledgedNotes,
             now: state.timerDate
         )
     }
@@ -278,6 +279,9 @@ extension Home.RootView {
         subtitle: String,
         tint: Color,
         isCritical: Bool = false,
+        tintOpacity: Double? = nil,
+        strokeOpacity: Double? = nil,
+        strokeWidth: CGFloat? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -309,9 +313,9 @@ extension Home.RootView {
             .frame(height: HomeLayout.bottomPanelHeight)
             .glassPanel(
                 tint: tint,
-                tintOpacity: isCritical ? 0.30 : 0.12,
-                strokeOpacity: isCritical ? 0.8 : 0.35,
-                strokeWidth: isCritical ? 1.5 : 1
+                tintOpacity: tintOpacity ?? (isCritical ? 0.30 : 0.12),
+                strokeOpacity: strokeOpacity ?? (isCritical ? 0.8 : 0.35),
+                strokeWidth: strokeWidth ?? (isCritical ? 1.5 : 1)
             )
             .contentShape(Rectangle())
         }
@@ -380,6 +384,22 @@ extension Home.RootView {
                     tint: .orange
                 ) {
                     openMaxIOBSetting()
+                }
+                .transition(.blurReplace)
+            case .whatsNew:
+                panelBanner(
+                    systemImage: "sparkles",
+                    title: String(
+                        localized: "New Release v\(releaseNotesService.notes?.version ?? "")",
+                        comment: "Home panel title offering the release notes; the placeholder is a version number"
+                    ),
+                    subtitle: String(localized: "See what's new in this version."),
+                    tint: .insulin,
+                    tintOpacity: 0.24,
+                    strokeOpacity: 0.7,
+                    strokeWidth: 1.5
+                ) {
+                    showReleaseNotes = true
                 }
                 .transition(.blurReplace)
             case .stats:
@@ -695,16 +715,15 @@ extension Home.RootView {
         Image(systemName: "xmark.app")
             .font(.system(size: 24))
             .foregroundStyle(Color.primary, Color.blue)
-            .confirmationDialog(
+            .glassActionSheet(
                 "Revert to previous profile?",
                 isPresented: $isConfirmRevertProfilePresented,
-                titleVisibility: .visible
-            ) {
-                Button("Revert", role: .destructive) {
-                    Task { await state.revertActiveProfile() }
-                }
-                Button("Cancel", role: .cancel) {}
-            }
+                actions: [
+                    GlassSheetAction("Revert", role: .destructive) {
+                        Task { await state.revertActiveProfile() }
+                    }
+                ]
+            )
             .onTapGesture {
                 isConfirmRevertProfilePresented = true
             }
@@ -726,19 +745,18 @@ extension Home.RootView {
         Image(systemName: "xmark.app")
             .font(.system(size: 24))
             .foregroundStyle(Color.primary, Color.loopGreen)
-            .confirmationDialog(
+            .glassActionSheet(
                 "Stop the Temp Target \"\(latestTempTarget.first?.name ?? "")\"?",
                 isPresented: $isConfirmStopTempTargetShown,
-                titleVisibility: .visible
-            ) {
-                Button("Stop", role: .destructive) {
-                    Task {
-                        guard let objectID = latestTempTarget.first?.objectID else { return }
-                        await state.cancelTempTarget(withID: objectID)
+                actions: [
+                    GlassSheetAction("Stop", role: .destructive) {
+                        Task {
+                            guard let objectID = latestTempTarget.first?.objectID else { return }
+                            await state.cancelTempTarget(withID: objectID)
+                        }
                     }
-                }
-                Button("Cancel", role: .cancel) {}
-            }
+                ]
+            )
             .onTapGesture {
                 if !latestTempTarget.isEmpty {
                     isConfirmStopTempTargetShown = true
@@ -750,19 +768,18 @@ extension Home.RootView {
         Image(systemName: "xmark.app")
             .font(.system(size: 24))
             .foregroundStyle(Color.primary, Color(red: 0.6235294118, green: 0.4235294118, blue: 0.9803921569))
-            .confirmationDialog(
+            .glassActionSheet(
                 "Stop the Override \"\(latestOverride.first?.name ?? "")\"?",
                 isPresented: $isConfirmStopOverridePresented,
-                titleVisibility: .visible
-            ) {
-                Button("Stop", role: .destructive) {
-                    Task {
-                        guard let objectID = latestOverride.first?.objectID else { return }
-                        await state.cancelOverride(withID: objectID)
+                actions: [
+                    GlassSheetAction("Stop", role: .destructive) {
+                        Task {
+                            guard let objectID = latestOverride.first?.objectID else { return }
+                            await state.cancelOverride(withID: objectID)
+                        }
                     }
-                }
-                Button("Cancel", role: .cancel) {}
-            }
+                ]
+            )
             .onTapGesture {
                 if !latestOverride.isEmpty {
                     isConfirmStopOverridePresented = true
@@ -856,31 +873,34 @@ extension Home.RootView {
                     noActiveAdjustmentsView()
                 }
             }.padding(.horizontal, 10)
-                .confirmationDialog("Adjustment to Stop", isPresented: $showCancelConfirmDialog) {
-                    Button("Stop Override", role: .destructive) {
-                        Task {
-                            guard let objectID = latestOverride.first?.objectID else { return }
-                            await state.cancelOverride(withID: objectID)
-                        }
-                    }
-                    Button("Stop Temp Target", role: .destructive) {
-                        Task {
-                            guard let objectID = latestTempTarget.first?.objectID else { return }
-                            await state.cancelTempTarget(withID: objectID)
-                        }
-                    }
-                    Button("Stop All Adjustments", role: .destructive) {
-                        Task {
-                            guard let overrideObjectID = latestOverride.first?.objectID else { return }
-                            await state.cancelOverride(withID: overrideObjectID)
+                .glassActionSheet(
+                    "Adjustment to Stop",
+                    message: Text("Select Adjustment"),
+                    isPresented: $showCancelConfirmDialog,
+                    actions: [
+                        GlassSheetAction("Stop Override", role: .destructive) {
+                            Task {
+                                guard let objectID = latestOverride.first?.objectID else { return }
+                                await state.cancelOverride(withID: objectID)
+                            }
+                        },
+                        GlassSheetAction("Stop Temp Target", role: .destructive) {
+                            Task {
+                                guard let objectID = latestTempTarget.first?.objectID else { return }
+                                await state.cancelTempTarget(withID: objectID)
+                            }
+                        },
+                        GlassSheetAction("Stop All Adjustments", role: .destructive) {
+                            Task {
+                                guard let overrideObjectID = latestOverride.first?.objectID else { return }
+                                await state.cancelOverride(withID: overrideObjectID)
 
-                            guard let tempTargetObjectID = latestTempTarget.first?.objectID else { return }
-                            await state.cancelTempTarget(withID: tempTargetObjectID)
+                                guard let tempTargetObjectID = latestTempTarget.first?.objectID else { return }
+                                await state.cancelTempTarget(withID: tempTargetObjectID)
+                            }
                         }
-                    }
-                } message: {
-                    Text("Select Adjustment")
-                }
+                    ]
+                )
         }
         .frame(height: HomeLayout.bottomPanelHeight)
         // Neutral glass like the stats face; the state color survives only as

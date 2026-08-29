@@ -2,12 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>HideSimulator</key>
-	<string>$(HIDE_SIMULATOR)</string>
 	<key>AppGroupID</key>
 	<string>$(APP_GROUP_ID)</string>
 	<key>AppDevVersion</key>
 	<string>$(APP_DEV_VERSION)</string>
+	<key>ReleaseNotesRepository</key>
+	<string>$(RELEASE_NOTES_REPO)</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).background-task.critical-event-log</string>

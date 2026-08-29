@@ -89,10 +89,8 @@ extension CGMSettings {
                             xDripConfigurationSection
                         }
 
-                        if !Bundle.main.simulatorVisibility.isHidden {
-                            if cgmCurrent.type == .simulator {
-                                simulatorConfigurationSection
-                            }
+                        if cgmCurrent.type == .simulator {
+                            simulatorConfigurationSection
                         }
 
                         if let appURL = cgmCurrent.type.appURL {
@@ -140,17 +138,18 @@ extension CGMSettings {
                 }
                 .scrollContentBackground(.hidden)
                 .background(appState.trioBackgroundColor(for: colorScheme))
-                .confirmationDialog("Delete CGM", isPresented: $shouldDisplayDeletionConfirmation) {
-                    Button(role: .destructive) {
-                        deleteCGM()
-                    } label: {
-                        Text("Delete \(cgmCurrent.displayName)")
-                            .font(.headline)
-                            .tint(.red)
-                    }
-                } message: { Text("Are you sure you want to delete \(cgmCurrent.displayName)?") }
+                .glassActionSheet(
+                    "Delete CGM",
+                    message: Text("Are you sure you want to delete \(cgmCurrent.displayName)?"),
+                    isPresented: $shouldDisplayDeletionConfirmation,
+                    actions: [
+                        GlassSheetAction("Delete \(cgmCurrent.displayName)", role: .destructive) {
+                            deleteCGM()
+                        }
+                    ]
+                )
                 .onAppear {
-                    if !Bundle.main.simulatorVisibility.isHidden && cgmCurrent.type == .simulator {
+                    if cgmCurrent.type == .simulator {
                         initializeSimulatorSettings()
                     }
                 }
