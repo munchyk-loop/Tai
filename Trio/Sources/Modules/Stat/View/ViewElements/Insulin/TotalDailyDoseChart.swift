@@ -13,6 +13,8 @@ struct TotalDailyDoseChart: View {
 
     /// The current scroll position in the chart.
     @State private var scrollPosition = Date()
+    /// The scroll position where the current swipe began.
+    @State private var dragStartScrollPosition: Date?
     /// The currently selected date in the chart.
     @State private var selectedDate: Date?
     /// The actual chart plot's width in pixels.
@@ -53,35 +55,10 @@ struct TotalDailyDoseChart: View {
         return nonZeroDoses.reduce(0, +) / Double(nonZeroDoses.count)
     }
 
-    /// In 3-month view, treat the fixed 93-day window as three equal 31-day periods.
-    /// Average only periods that contain insulin, so an entirely zero/empty period does not dilute the result.
+    /// The 3-month chart is normalized to three 31-day visual months.
+    /// Using the non-zero daily average preserves the rule that 0-U days do not dilute averages.
     private var monthlyAverageDose: Double {
-        guard selectedInterval == .total else { return 0 }
-
-        let calendar = Calendar.current
-        let startDay = calendar.startOfDay(for: visibleDateRange.start)
-        var periodTotals = [Double](repeating: 0, count: 3)
-        var periodHasInsulin = [Bool](repeating: false, count: 3)
-
-        for stat in visibleStats where stat.amount > 0 {
-            let statDay = calendar.startOfDay(for: stat.date)
-            guard let dayOffset = calendar.dateComponents([.day], from: startDay, to: statDay).day,
-                  dayOffset >= 0
-            else { continue }
-
-            let periodIndex = dayOffset / 31
-            guard periodIndex < 3 else { continue }
-
-            periodTotals[periodIndex] += stat.amount
-            periodHasInsulin[periodIndex] = true
-        }
-
-        let nonZeroPeriodTotals = periodTotals.enumerated().compactMap { index, total in
-            periodHasInsulin[index] ? total : nil
-        }
-
-        guard !nonZeroPeriodTotals.isEmpty else { return 0 }
-        return nonZeroPeriodTotals.reduce(0, +) / Double(nonZeroPeriodTotals.count)
+        averageDose * 31
     }
 
     private var averageLabel: String {
@@ -106,6 +83,30 @@ struct TotalDailyDoseChart: View {
     private func getTDDForDate(_ date: Date) -> TDDStats? {
         tddStats.first { stat in
             StatChartUtils.isSameTimeUnit(stat.date, date, for: selectedInterval)
+        }
+    }
+
+    private func handleSwipeChanged() {
+        if dragStartScrollPosition == nil {
+            dragStartScrollPosition = scrollPosition
+        }
+    }
+
+    private func handleSwipeEnded(_ value: DragGesture.Value) {
+        defer { dragStartScrollPosition = nil }
+
+        // A deliberate swipe gets semantic range snapping; a slower/smaller drag remains precisely scrollable.
+        let projectedTranslation = value.predictedEndTranslation.width
+        guard abs(projectedTranslation) >= 80 else { return }
+
+        let direction = projectedTranslation < 0 ? 1 : -1
+        let start = dragStartScrollPosition ?? scrollPosition
+        let target = StatChartUtils.tddSwipeTarget(from: start, for: selectedInterval, direction: direction)
+
+        DispatchQueue.main.async {
+            withAnimation(.snappy) {
+                scrollPosition = target
+            }
         }
     }
 
@@ -134,6 +135,7 @@ struct TotalDailyDoseChart: View {
         }
         .onChange(of: selectedInterval) {
             selectedDate = nil
+            dragStartScrollPosition = nil
             scrollPosition = StatChartUtils.getInitialTDDScrollPosition(for: selectedInterval)
         }
     }
@@ -274,13 +276,16 @@ struct TotalDailyDoseChart: View {
         .chartScrollPosition(x: $scrollPosition)
         .chartScrollTargetBehavior(
             .valueAligned(
-                matching: StatChartUtils.tddMinorAlignmentComponents(for: selectedInterval),
-                majorAlignment: .matching(StatChartUtils.tddMajorAlignmentComponents(for: selectedInterval)),
-                limitBehavior: .always
+                matching: StatChartUtils.tddMinorAlignmentComponents(for: selectedInterval)
             )
         )
         .chartXVisibleDomain(
             length: StatChartUtils.tddVisibleDomainLength(from: scrollPosition, for: selectedInterval)
+        )
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onChanged { _ in handleSwipeChanged() }
+                .onEnded(handleSwipeEnded)
         )
         .frame(height: 250)
     }

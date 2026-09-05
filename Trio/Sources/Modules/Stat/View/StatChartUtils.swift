@@ -60,14 +60,11 @@ struct StatChartUtils {
         case .day:
             return today
         case .week:
-            let weekday = calendar.component(.weekday, from: today)
-            return calendar.date(byAdding: .day, value: -(weekday - 1), to: today) ?? today
+            return sundayStart(for: today)
         case .month:
-            let components = calendar.dateComponents([.year, .month], from: today)
-            return calendar.date(from: components) ?? today
+            return monthStart(for: today)
         case .total:
-            let components = calendar.dateComponents([.year, .month], from: today)
-            let currentMonthStart = calendar.date(from: components) ?? today
+            let currentMonthStart = monthStart(for: today)
             return calendar.date(byAdding: .month, value: -2, to: currentMonthStart) ?? currentMonthStart
         }
     }
@@ -85,19 +82,44 @@ struct StatChartUtils {
         }
     }
 
-    /// Major alignment used for normal swipes.
-    /// This follows Swift Charts' calendar-component snapping model rather than page-width inference.
-    static func tddMajorAlignmentComponents(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
+    /// Returns the next/previous canonical range start for a deliberate swipe.
+    /// The fixed visual widths remain 1/7/31/93 days, while the snap anchors stay semantic:
+    /// midnight, Sunday, month-start, or a three-month jump from a month-start.
+    static func tddSwipeTarget(
+        from date: Date,
+        for selectedInterval: Stat.StateModel.StatsTimeInterval,
+        direction: Int
+    ) -> Date {
+        let calendar = Calendar.current
+        let step = direction >= 0 ? 1 : -1
+
         switch selectedInterval {
         case .day:
-            return DateComponents(hour: 0)
+            let start = calendar.startOfDay(for: date)
+            return calendar.date(byAdding: .day, value: step, to: start) ?? start
         case .week:
-            // Gregorian weekday 1 is Sunday, regardless of the user's locale firstWeekday setting.
-            return DateComponents(hour: 0, weekday: 1)
-        case .month,
-             .total:
-            return DateComponents(day: 1, hour: 0)
+            let start = sundayStart(for: date)
+            return calendar.date(byAdding: .day, value: 7 * step, to: start) ?? start
+        case .month:
+            let start = monthStart(for: date)
+            return calendar.date(byAdding: .month, value: step, to: start) ?? start
+        case .total:
+            let start = monthStart(for: date)
+            return calendar.date(byAdding: .month, value: 3 * step, to: start) ?? start
         }
+    }
+
+    private static func sundayStart(for date: Date) -> Date {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: date)
+        let weekday = calendar.component(.weekday, from: dayStart)
+        return calendar.date(byAdding: .day, value: -(weekday - 1), to: dayStart) ?? dayStart
+    }
+
+    private static func monthStart(for date: Date) -> Date {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
     }
 
     /// Returns the end boundary of the current canonical TDD window.
