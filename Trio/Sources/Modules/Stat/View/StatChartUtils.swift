@@ -15,28 +15,29 @@ struct StatChartUtils {
         }
     }
 
-    /// Returns the calendar-accurate visible domain length for the TDD chart.
-    /// This keeps day/week/month/3-month pages aligned to real calendar periods,
-    /// including DST transitions and variable month lengths.
+    /// Returns the TDD chart's fixed visual window length using calendar-day arithmetic.
+    /// Month always displays 31 day slots and 3-month always displays 93 day slots.
+    /// Calendar arithmetic keeps midnight boundaries correct across DST changes.
     static func tddVisibleDomainLength(
         from scrollPosition: Date,
         for selectedInterval: Stat.StateModel.StatsTimeInterval
     ) -> TimeInterval {
         let calendar = Calendar.current
-        let end: Date?
+        let dayCount: Int
 
         switch selectedInterval {
         case .day:
-            end = calendar.date(byAdding: .day, value: 1, to: scrollPosition)
+            dayCount = 1
         case .week:
-            end = calendar.date(byAdding: .day, value: 7, to: scrollPosition)
+            dayCount = 7
         case .month:
-            end = calendar.date(byAdding: .month, value: 1, to: scrollPosition)
+            dayCount = 31
         case .total:
-            end = calendar.date(byAdding: .month, value: 3, to: scrollPosition)
+            dayCount = 93
         }
 
-        return end?.timeIntervalSince(scrollPosition) ?? visibleDomainLength(for: selectedInterval)
+        let end = calendar.date(byAdding: .day, value: dayCount, to: scrollPosition)
+        return end?.timeIntervalSince(scrollPosition) ?? TimeInterval(dayCount * 24 * 3600)
     }
 
     /// Computes the exact visible range for the TDD chart without expanding it to an extra day.
@@ -48,9 +49,9 @@ struct StatChartUtils {
         return (scrollPosition, scrollPosition.addingTimeInterval(length - 1))
     }
 
-    /// Returns the canonical start of the current TDD page.
+    /// Returns the canonical initial start of the TDD chart.
     /// Day starts at midnight, week starts Sunday, month starts on the 1st,
-    /// and the 3-month view starts at the beginning of the current calendar quarter.
+    /// and 3-month starts on the 1st two months before the current month.
     static func getInitialTDDScrollPosition(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Date {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -66,13 +67,40 @@ struct StatChartUtils {
             return calendar.date(from: components) ?? today
         case .total:
             let components = calendar.dateComponents([.year, .month], from: today)
-            guard let year = components.year, let month = components.month else { return today }
-            let startMonth = ((month - 1) / 3) * 3 + 1
-            return calendar.date(from: DateComponents(year: year, month: startMonth, day: 1)) ?? today
+            let currentMonthStart = calendar.date(from: components) ?? today
+            return calendar.date(byAdding: .month, value: -2, to: currentMonthStart) ?? currentMonthStart
         }
     }
 
-    /// Returns the end boundary of the current canonical TDD page.
+    /// Fine-grained alignment used after a precise drag.
+    /// Day can settle on an hour; longer views can settle on any midnight.
+    static func tddMinorAlignmentComponents(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
+        switch selectedInterval {
+        case .day:
+            return DateComponents(minute: 0)
+        case .week,
+             .month,
+             .total:
+            return DateComponents(hour: 0)
+        }
+    }
+
+    /// Major alignment used for normal swipes.
+    /// This follows Swift Charts' calendar-component snapping model rather than page-width inference.
+    static func tddMajorAlignmentComponents(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
+        switch selectedInterval {
+        case .day:
+            return DateComponents(hour: 0)
+        case .week:
+            // Gregorian weekday 1 is Sunday, regardless of the user's locale firstWeekday setting.
+            return DateComponents(hour: 0, weekday: 1)
+        case .month,
+             .total:
+            return DateComponents(day: 1, hour: 0)
+        }
+    }
+
+    /// Returns the end boundary of the current canonical TDD window.
     /// An invisible mark at this date lets Swift Charts display the complete current period,
     /// even when future hours/days in that period do not have insulin data yet.
     static func currentTDDPageEnd(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Date {

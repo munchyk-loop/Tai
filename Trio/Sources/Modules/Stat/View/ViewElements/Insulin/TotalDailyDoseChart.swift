@@ -53,21 +53,51 @@ struct TotalDailyDoseChart: View {
         return nonZeroDoses.reduce(0, +) / Double(nonZeroDoses.count)
     }
 
-    private var averageLabel: String {
-        selectedInterval == .day ? "Hourly Average:" : "Daily Average:"
+    /// In 3-month view, treat the fixed 93-day window as three equal 31-day periods.
+    /// Average only periods that contain insulin, so an entirely zero/empty period does not dilute the result.
+    private var monthlyAverageDose: Double {
+        guard selectedInterval == .total else { return 0 }
+
+        let calendar = Calendar.current
+        let startDay = calendar.startOfDay(for: visibleDateRange.start)
+        var periodTotals = [Double](repeating: 0, count: 3)
+        var periodHasInsulin = [Bool](repeating: false, count: 3)
+
+        for stat in visibleStats where stat.amount > 0 {
+            let statDay = calendar.startOfDay(for: stat.date)
+            guard let dayOffset = calendar.dateComponents([.day], from: startDay, to: statDay).day,
+                  dayOffset >= 0
+            else { continue }
+
+            let periodIndex = dayOffset / 31
+            guard periodIndex < 3 else { continue }
+
+            periodTotals[periodIndex] += stat.amount
+            periodHasInsulin[periodIndex] = true
+        }
+
+        let nonZeroPeriodTotals = periodTotals.enumerated().compactMap { index, total in
+            periodHasInsulin[index] ? total : nil
+        }
+
+        guard !nonZeroPeriodTotals.isEmpty else { return 0 }
+        return nonZeroPeriodTotals.reduce(0, +) / Double(nonZeroPeriodTotals.count)
     }
 
-    private var totalLabel: String {
-        switch selectedInterval {
-        case .day:
-            return "Daily Total:"
-        case .week:
-            return "Weekly Total:"
-        case .month:
-            return "Monthly Total:"
-        case .total:
-            return "3-Month Total:"
-        }
+    private var averageLabel: String {
+        selectedInterval == .day ? "Hourly Average" : "Daily Average"
+    }
+
+    private var secondaryLabel: String {
+        selectedInterval == .total ? "Monthly Average" : "Total"
+    }
+
+    private var secondaryDose: Double {
+        selectedInterval == .total ? monthlyAverageDose : totalDose
+    }
+
+    private var chartTitle: String {
+        selectedInterval == .day ? "Total Hourly Dose (U)" : "Total Daily Dose (U)"
     }
 
     /// Retrieves the TDD statistic for a given date.
@@ -84,7 +114,7 @@ struct TotalDailyDoseChart: View {
             statsView.padding(.bottom)
 
             VStack(alignment: .trailing) {
-                Text("Total Daily Dose (U)")
+                Text(chartTitle)
                     .foregroundStyle(.secondary)
                     .font(.footnote)
                     .padding(.bottom, 4)
@@ -108,20 +138,12 @@ struct TotalDailyDoseChart: View {
         }
     }
 
-    /// A view displaying the average and total for the exact bars in the visible range.
+    /// A view displaying the average and secondary summary for the exact bars in the visible range.
     private var statsView: some View {
         HStack {
-            Grid(alignment: .leading) {
-                GridRow {
-                    Text(averageLabel)
-                    Text(averageDose.formatted(.number.precision(.fractionLength(1))))
-                        + Text("\u{00A0}") + Text("U")
-                }
-                GridRow {
-                    Text(totalLabel)
-                    Text(totalDose.formatted(.number.precision(.fractionLength(1))))
-                        + Text("\u{00A0}") + Text("U")
-                }
+            VStack(alignment: .leading, spacing: 4) {
+                summaryRow(label: averageLabel, value: averageDose)
+                summaryRow(label: secondaryLabel, value: secondaryDose)
             }
             .font(.headline)
 
@@ -133,6 +155,16 @@ struct TotalDailyDoseChart: View {
             )
             .font(.callout)
             .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Keeps each value immediately adjacent to its label rather than sharing a variable-width Grid column.
+    /// This prevents longer labels such as "Monthly Average" from pushing the first row's value farther away.
+    private func summaryRow(label: String, value: Double) -> some View {
+        HStack(spacing: 4) {
+            Text("\(label):")
+            Text(value.formatted(.number.precision(.fractionLength(1))))
+                + Text("\u{00A0}") + Text("U")
         }
     }
 
@@ -161,7 +193,7 @@ struct TotalDailyDoseChart: View {
                 )
             }
 
-            // Keep the complete current calendar period scrollable even when its future
+            // Keep the complete current fixed window scrollable even when its future
             // hours/days do not have insulin records yet.
             PointMark(
                 x: .value("Current Range End", StatChartUtils.currentTDDPageEnd(for: selectedInterval)),
@@ -242,10 +274,9 @@ struct TotalDailyDoseChart: View {
         .chartScrollPosition(x: $scrollPosition)
         .chartScrollTargetBehavior(
             .valueAligned(
-                matching: selectedInterval == .day ?
-                    DateComponents(minute: 0) :
-                    DateComponents(hour: 0),
-                majorAlignment: .page
+                matching: StatChartUtils.tddMinorAlignmentComponents(for: selectedInterval),
+                majorAlignment: .matching(StatChartUtils.tddMajorAlignmentComponents(for: selectedInterval)),
+                limitBehavior: .always
             )
         )
         .chartXVisibleDomain(
