@@ -13,9 +13,6 @@ struct TotalDailyDoseChart: View {
 
     /// The current scroll position in the chart.
     @State private var scrollPosition = Date()
-    /// The visible calendar-period duration. This is updated only when native snapping lands
-    /// on a new major calendar anchor, so month width does not mutate continuously during a drag.
-    @State private var visibleDomainLength: TimeInterval = 24 * 3600
     /// The currently selected date in the chart.
     @State private var selectedDate: Date?
     /// The actual chart plot's width in pixels.
@@ -32,18 +29,15 @@ struct TotalDailyDoseChart: View {
     }
 
     /// Computes the exact visible date range.
-    /// The 3-month view is a static latest-90-day overview; other views follow the scroll position.
+    /// The 3-month view is a static latest-90-day overview; scrolling views use the native visible-domain length.
     private var visibleDateRange: (start: Date, end: Date) {
         if selectedInterval == .total {
             let range = StatChartUtils.latest90DayTDDRange()
             return (range.start, range.end)
         }
 
-        let start = canonicalMajorAnchor(for: scrollPosition) ?? scrollPosition
-        return (
-            start,
-            start.addingTimeInterval(visibleDomainLength - 1)
-        )
+        let length = StatChartUtils.visibleDomainLength(for: selectedInterval)
+        return (scrollPosition, scrollPosition.addingTimeInterval(length - 1))
     }
 
     /// The hourly/daily bars that are currently visible.
@@ -103,51 +97,7 @@ struct TotalDailyDoseChart: View {
 
     /// Reset the chart to the canonical current period for the selected interval.
     private func resetChartWindow() {
-        let initial = StatChartUtils.getInitialTDDScrollPosition(for: selectedInterval)
-        scrollPosition = initial
-        visibleDomainLength = StatChartUtils.tddVisibleDomainLength(from: initial, for: selectedInterval)
-    }
-
-    /// Quantizes a native scroll-position binding back to the semantic major boundary.
-    /// Swift Charts can report a binding a few minutes to either side of midnight even when it has
-    /// visually snapped, so test the nearest midnight rather than requiring exact equality.
-    private func canonicalMajorAnchor(for date: Date) -> Date? {
-        guard selectedInterval != .total else { return nil }
-
-        let calendar = Calendar.current
-        let currentDayStart = calendar.startOfDay(for: date)
-        let nextDayStart = calendar.date(byAdding: .day, value: 1, to: currentDayStart) ?? currentDayStart
-        let midnightTolerance: TimeInterval = 15 * 60
-
-        let anchor: Date
-        if abs(date.timeIntervalSince(currentDayStart)) <= midnightTolerance {
-            anchor = currentDayStart
-        } else if abs(nextDayStart.timeIntervalSince(date)) <= midnightTolerance {
-            anchor = nextDayStart
-        } else {
-            return nil
-        }
-
-        switch selectedInterval {
-        case .day:
-            return anchor
-        case .week:
-            return calendar.component(.weekday, from: anchor) == 1 ? anchor : nil
-        case .month:
-            return calendar.component(.day, from: anchor) == 1 ? anchor : nil
-        case .total:
-            return nil
-        }
-    }
-
-    /// Update a variable calendar-period viewport only after native major snapping has completed.
-    private func updateVisibleDomainAfterNativeSnap(_ newPosition: Date) {
-        guard let anchor = canonicalMajorAnchor(for: newPosition) else { return }
-        let newLength = StatChartUtils.tddVisibleDomainLength(from: anchor, for: selectedInterval)
-
-        if abs(newLength - visibleDomainLength) > 1 {
-            visibleDomainLength = newLength
-        }
+        scrollPosition = StatChartUtils.getInitialTDDScrollPosition(for: selectedInterval)
     }
 
     var body: some View {
@@ -176,9 +126,6 @@ struct TotalDailyDoseChart: View {
         .onChange(of: selectedInterval) {
             selectedDate = nil
             resetChartWindow()
-        }
-        .onChange(of: scrollPosition) { _, newPosition in
-            updateVisibleDomainAfterNativeSnap(newPosition)
         }
     }
 
@@ -211,7 +158,8 @@ struct TotalDailyDoseChart: View {
         }
     }
 
-    /// Applies either the native scroll/snap behavior or the static latest-90-day domain.
+    /// Uses Swift Charts' built-in scrolling and value-aligned swipe behavior.
+    /// The 3-month view remains a static latest-90-day overview.
     @ViewBuilder private var chartsView: some View {
         if selectedInterval == .total {
             let range = StatChartUtils.latest90DayTDDRange()
@@ -225,14 +173,13 @@ struct TotalDailyDoseChart: View {
                 .chartScrollPosition(x: $scrollPosition)
                 .chartScrollTargetBehavior(
                     .valueAligned(
-                        matching: StatChartUtils.tddMinorAlignmentComponents(for: selectedInterval),
-                        majorAlignment: .matching(
-                            StatChartUtils.tddMajorAlignmentComponents(for: selectedInterval)
-                        ),
-                        limitBehavior: .always
+                        matching: selectedInterval == .day ?
+                            DateComponents(minute: 0) :
+                            DateComponents(hour: 0),
+                        majorAlignment: .matching(StatChartUtils.alignmentComponents(for: selectedInterval))
                     )
                 )
-                .chartXVisibleDomain(length: visibleDomainLength)
+                .chartXVisibleDomain(length: StatChartUtils.visibleDomainLength(for: selectedInterval))
                 .frame(height: 250)
         }
     }
