@@ -11,14 +11,14 @@ struct TotalDailyDoseChart: View {
     /// The list of TDD statistics data.
     let tddStats: [TDDStats]
 
-    /// The current scroll position in the chart.
-    @State private var scrollPosition = Date()
+    /// The last native scroll position after scrolling has fully settled.
+    @State private var settledScrollPosition: Date
     /// The currently selected date in the chart.
     @State private var selectedDate: Date?
     /// The actual chart plot's width in pixels.
     @State private var chartWidth: CGFloat = 0
 
-    /// Keep the existing call site API while deriving summaries directly from the visible bars.
+    /// Keep the existing call site API while deriving summaries directly from the settled visible bars.
     init(
         selectedInterval: Binding<Stat.StateModel.StatsTimeInterval>,
         tddStats: [TDDStats],
@@ -26,27 +26,23 @@ struct TotalDailyDoseChart: View {
     ) {
         _selectedInterval = selectedInterval
         self.tddStats = tddStats
+        _settledScrollPosition = State(
+            initialValue: StatChartUtils.getInitialTDDScrollPosition(for: selectedInterval.wrappedValue)
+        )
     }
 
-    /// Computes the exact visible date range.
-    /// The 3-month view is a static latest-90-day overview; scrolling views use fixed visible-domain lengths.
+    /// Computes the exact settled visible date range.
+    /// The 3-month view is a static latest-90-day overview; scrolling views use calendar-aware periods.
     private var visibleDateRange: (start: Date, end: Date) {
         if selectedInterval == .total {
             let range = StatChartUtils.latest90DayTDDRange()
             return (range.start, range.end)
         }
 
-        let length = StatChartUtils.visibleDomainLength(for: selectedInterval)
-        return (scrollPosition, scrollPosition.addingTimeInterval(length - 1))
-    }
-
-    /// The end boundary of the fixed visible domain.
-    private var visibleDomainEnd: Date {
-        if selectedInterval == .total {
-            return StatChartUtils.latest90DayTDDRange().domainEnd
-        }
-
-        return scrollPosition.addingTimeInterval(StatChartUtils.visibleDomainLength(for: selectedInterval))
+        return StatChartUtils.tddVisibleDateRange(
+            from: settledScrollPosition,
+            for: selectedInterval
+        )
     }
 
     /// The bars supplied to the chart. The static 3-month overview is explicitly limited to the latest 90 days.
@@ -56,8 +52,8 @@ struct TotalDailyDoseChart: View {
         return tddStats.filter { $0.date >= range.start && $0.date <= range.end }
     }
 
-    /// Computes both visible summary values in one pass so scroll-position updates do not repeatedly
-    /// filter the full data set for average and total independently.
+    /// Computes both visible summary values in one pass.
+    /// These values are based on the settled page, so they do not churn during drag/deceleration.
     private var visibleSummary: (average: Double, total: Double) {
         let range = visibleDateRange
         var total = 0.0
@@ -88,29 +84,17 @@ struct TotalDailyDoseChart: View {
         selectedInterval == .day ? "Total Hourly Dose (U)" : "Total Daily Dose (U)"
     }
 
-    /// Health-style Month label: just the month when exactly aligned to the first,
-    /// otherwise the literal fixed 30-day range during precision scrolling.
+    /// Month pages use the full month name. Other intervals retain their existing range formatting.
     private var visibleRangeLabel: String {
-        guard selectedInterval == .month else {
-            return StatChartUtils.formatVisibleDateRange(
-                from: visibleDateRange.start,
-                to: visibleDateRange.end,
-                for: selectedInterval
-            )
+        if selectedInterval == .month {
+            return settledScrollPosition.formatted(.dateTime.month(.wide))
         }
 
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: scrollPosition)
-        let isMonthAnchor = calendar.component(.day, from: startOfDay) == 1 &&
-            abs(scrollPosition.timeIntervalSince(startOfDay)) < 60
-
-        if isMonthAnchor {
-            return startOfDay.formatted(.dateTime.month(.abbreviated))
-        }
-
-        let start = scrollPosition.formatted(.dateTime.month(.abbreviated).day())
-        let end = visibleDomainEnd.formatted(.dateTime.month(.abbreviated).day())
-        return "\(start)–\(end)"
+        return StatChartUtils.formatVisibleDateRange(
+            from: visibleDateRange.start,
+            to: visibleDateRange.end,
+            for: selectedInterval
+        )
     }
 
     /// Retrieves the TDD statistic for a given date.
@@ -124,7 +108,7 @@ struct TotalDailyDoseChart: View {
 
     /// Reset the chart to the canonical current period for the selected interval.
     private func resetChartWindow() {
-        scrollPosition = StatChartUtils.getInitialTDDScrollPosition(for: selectedInterval)
+        settledScrollPosition = StatChartUtils.getInitialTDDScrollPosition(for: selectedInterval)
     }
 
     var body: some View {
@@ -156,7 +140,7 @@ struct TotalDailyDoseChart: View {
         }
     }
 
-    /// A view displaying the average and secondary summary for the exact bars in the visible range.
+    /// A view displaying the average and secondary summary for the exact bars in the settled visible range.
     private var statsView: some View {
         let summary = visibleSummary
         let secondaryDose = selectedInterval == .total ? summary.average * 30 : summary.total
@@ -185,8 +169,8 @@ struct TotalDailyDoseChart: View {
         }
     }
 
-    /// Uses Swift Charts' built-in value-aligned scrolling with fixed visible domains.
-    /// Swipes target true calendar boundaries: midnight, the first day of the week, or the first of the month.
+    /// Uses Swift Charts' native value-aligned scrolling.
+    /// Live scroll state is isolated in `NativeTDDScrollableChart` so summary/header work only occurs after settling.
     /// The 3-month view remains a static latest-90-day overview.
     @ViewBuilder private var chartsView: some View {
         if selectedInterval == .total {
@@ -196,20 +180,14 @@ struct TotalDailyDoseChart: View {
                 .chartXScale(domain: range.start ... range.domainEnd)
                 .frame(height: 250)
         } else {
-            baseChart
-                .chartScrollableAxes(.horizontal)
-                .chartXVisibleDomain(length: StatChartUtils.visibleDomainLength(for: selectedInterval))
-                .chartScrollPosition(x: $scrollPosition)
-                .chartScrollTargetBehavior(
-                    .valueAligned(
-                        matching: selectedInterval == .day ?
-                            DateComponents(minute: 0) :
-                            DateComponents(hour: 0),
-                        majorAlignment: .matching(StatChartUtils.alignmentComponents(for: selectedInterval)),
-                        limitBehavior: .always
-                    )
-                )
-                .frame(height: 250)
+            NativeTDDScrollableChart(
+                selectedInterval: selectedInterval,
+                settledScrollPosition: $settledScrollPosition
+            ) {
+                baseChart
+            }
+            .id(selectedInterval)
+            .frame(height: 250)
         }
     }
 
@@ -314,6 +292,139 @@ struct TotalDailyDoseChart: View {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Owns the live Swift Charts scroll binding so scrolling does not invalidate the parent's
+/// summaries and header on every frame. Snapping remains entirely native Swift Charts behavior.
+private struct NativeTDDScrollableChart<Content: View>: View {
+    let selectedInterval: Stat.StateModel.StatsTimeInterval
+    @Binding var settledScrollPosition: Date
+    let content: Content
+
+    @State private var scrollPosition: Date
+    @State private var visibleDomainLength: TimeInterval
+
+    init(
+        selectedInterval: Stat.StateModel.StatsTimeInterval,
+        settledScrollPosition: Binding<Date>,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.selectedInterval = selectedInterval
+        _settledScrollPosition = settledScrollPosition
+
+        let initialPosition = settledScrollPosition.wrappedValue
+        _scrollPosition = State(initialValue: initialPosition)
+        _visibleDomainLength = State(
+            initialValue: StatChartUtils.tddVisibleDomainLength(
+                from: initialPosition,
+                for: selectedInterval
+            )
+        )
+        self.content = content()
+    }
+
+    /// Every native stop target is a full period boundary rather than an hourly/daily minor mark.
+    /// This is still `ChartScrollTargetBehavior.valueAligned`; there is no custom gesture or velocity logic.
+    private var pageAlignmentComponents: DateComponents {
+        var components = DateComponents()
+
+        switch selectedInterval {
+        case .day:
+            components.hour = 0
+            components.minute = 0
+            components.second = 0
+        case .week:
+            components.hour = 0
+            components.minute = 0
+            components.second = 0
+            components.weekday = 1 // Sunday
+        case .month:
+            components.day = 1
+            components.hour = 0
+            components.minute = 0
+            components.second = 0
+        case .total:
+            break
+        }
+
+        return components
+    }
+
+    private var configuredChart: some View {
+        content
+            .chartScrollableAxes(.horizontal)
+            .chartXVisibleDomain(length: visibleDomainLength)
+            .chartScrollPosition(x: $scrollPosition)
+            .chartScrollTargetBehavior(
+                .valueAligned(
+                    matching: pageAlignmentComponents,
+                    majorAlignment: .matching(pageAlignmentComponents),
+                    limitBehavior: .always
+                )
+            )
+    }
+
+    var body: some View {
+        Group {
+            if #available(iOS 18.0, *) {
+                configuredChart
+                    .onScrollPhaseChange { _, newPhase in
+                        if newPhase == .idle {
+                            settleScrollPosition()
+                        }
+                    }
+            } else {
+                // iOS 17 has no native scroll-phase callback. Preserve the legacy live summary behavior there.
+                configuredChart
+                    .onChange(of: scrollPosition) { _, newPosition in
+                        settledScrollPosition = newPosition
+                    }
+            }
+        }
+        .onAppear {
+            synchronizeFromSettledPosition()
+        }
+        .onChange(of: settledScrollPosition) { _, newPosition in
+            guard abs(newPosition.timeIntervalSince(scrollPosition)) > 0.5 else { return }
+            scrollPosition = newPosition
+            visibleDomainLength = StatChartUtils.tddVisibleDomainLength(
+                from: newPosition,
+                for: selectedInterval
+            )
+        }
+    }
+
+    /// Publish one state change after native drag/deceleration/snapping is fully idle.
+    /// Month width is also updated here so 28/29/30/31-day months each fill the chart.
+    private func settleScrollPosition() {
+        let finalPosition = scrollPosition
+        let finalDomainLength = StatChartUtils.tddVisibleDomainLength(
+            from: finalPosition,
+            for: selectedInterval
+        )
+
+        if abs(finalDomainLength - visibleDomainLength) > 0.5 {
+            visibleDomainLength = finalDomainLength
+        }
+
+        if abs(finalPosition.timeIntervalSince(settledScrollPosition)) > 0.5 {
+            settledScrollPosition = finalPosition
+        }
+    }
+
+    private func synchronizeFromSettledPosition() {
+        if abs(settledScrollPosition.timeIntervalSince(scrollPosition)) > 0.5 {
+            scrollPosition = settledScrollPosition
+        }
+
+        let expectedLength = StatChartUtils.tddVisibleDomainLength(
+            from: settledScrollPosition,
+            for: selectedInterval
+        )
+        if abs(expectedLength - visibleDomainLength) > 0.5 {
+            visibleDomainLength = expectedLength
         }
     }
 }
