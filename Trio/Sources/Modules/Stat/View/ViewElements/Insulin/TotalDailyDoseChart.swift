@@ -39,9 +39,10 @@ struct TotalDailyDoseChart: View {
             return (range.start, range.end)
         }
 
+        let start = canonicalMajorAnchor(for: scrollPosition) ?? scrollPosition
         return (
-            scrollPosition,
-            scrollPosition.addingTimeInterval(visibleDomainLength - 1)
+            start,
+            start.addingTimeInterval(visibleDomainLength - 1)
         )
     }
 
@@ -108,23 +109,32 @@ struct TotalDailyDoseChart: View {
     }
 
     /// Quantizes a native scroll-position binding back to the semantic major boundary.
-    /// Swift Charts can report a binding a few minutes off even when it has visually snapped,
-    /// so use a small tolerance rather than requiring exact midnight equality.
+    /// Swift Charts can report a binding a few minutes to either side of midnight even when it has
+    /// visually snapped, so test the nearest midnight rather than requiring exact equality.
     private func canonicalMajorAnchor(for date: Date) -> Date? {
         guard selectedInterval != .total else { return nil }
 
         let calendar = Calendar.current
-        let dayStart = calendar.startOfDay(for: date)
+        let currentDayStart = calendar.startOfDay(for: date)
+        let nextDayStart = calendar.date(byAdding: .day, value: 1, to: currentDayStart) ?? currentDayStart
         let midnightTolerance: TimeInterval = 15 * 60
-        guard abs(date.timeIntervalSince(dayStart)) <= midnightTolerance else { return nil }
+
+        let anchor: Date
+        if abs(date.timeIntervalSince(currentDayStart)) <= midnightTolerance {
+            anchor = currentDayStart
+        } else if abs(nextDayStart.timeIntervalSince(date)) <= midnightTolerance {
+            anchor = nextDayStart
+        } else {
+            return nil
+        }
 
         switch selectedInterval {
         case .day:
-            return dayStart
+            return anchor
         case .week:
-            return calendar.component(.weekday, from: dayStart) == 1 ? dayStart : nil
+            return calendar.component(.weekday, from: anchor) == 1 ? anchor : nil
         case .month:
-            return calendar.component(.day, from: dayStart) == 1 ? dayStart : nil
+            return calendar.component(.day, from: anchor) == 1 ? anchor : nil
         case .total:
             return nil
         }
