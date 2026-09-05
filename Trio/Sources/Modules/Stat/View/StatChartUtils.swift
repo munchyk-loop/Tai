@@ -84,7 +84,8 @@ struct StatChartUtils {
 
     /// Returns the next/previous canonical range start for a deliberate swipe.
     /// The fixed visual widths remain 1/7/31/93 days, while the snap anchors stay semantic:
-    /// midnight, Sunday, month-start, or a three-month jump from a month-start.
+    /// midnight, Sunday, or month-start. The 93-day view advances one month at a time
+    /// so users can choose overlapping consecutive-month windows.
     static func tddSwipeTarget(
         from date: Date,
         for selectedInterval: Stat.StateModel.StatsTimeInterval,
@@ -105,7 +106,7 @@ struct StatChartUtils {
             return calendar.date(byAdding: .month, value: step, to: start) ?? start
         case .total:
             let start = monthStart(for: date)
-            return calendar.date(byAdding: .month, value: 3 * step, to: start) ?? start
+            return calendar.date(byAdding: .month, value: step, to: start) ?? start
         }
     }
 
