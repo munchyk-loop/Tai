@@ -15,7 +15,73 @@ struct StatChartUtils {
         }
     }
 
-    /// Computes the visible date range based on the scroll position and selected duration.
+    /// Returns the calendar-accurate visible domain length for the TDD chart.
+    /// This keeps day/week/month/3-month pages aligned to real calendar periods,
+    /// including DST transitions and variable month lengths.
+    static func tddVisibleDomainLength(
+        from scrollPosition: Date,
+        for selectedInterval: Stat.StateModel.StatsTimeInterval
+    ) -> TimeInterval {
+        let calendar = Calendar.current
+        let end: Date?
+
+        switch selectedInterval {
+        case .day:
+            end = calendar.date(byAdding: .day, value: 1, to: scrollPosition)
+        case .week:
+            end = calendar.date(byAdding: .day, value: 7, to: scrollPosition)
+        case .month:
+            end = calendar.date(byAdding: .month, value: 1, to: scrollPosition)
+        case .total:
+            end = calendar.date(byAdding: .month, value: 3, to: scrollPosition)
+        }
+
+        return end?.timeIntervalSince(scrollPosition) ?? visibleDomainLength(for: selectedInterval)
+    }
+
+    /// Computes the exact visible range for the TDD chart without expanding it to an extra day.
+    static func tddVisibleDateRange(
+        from scrollPosition: Date,
+        for selectedInterval: Stat.StateModel.StatsTimeInterval
+    ) -> (start: Date, end: Date) {
+        let length = tddVisibleDomainLength(from: scrollPosition, for: selectedInterval)
+        return (scrollPosition, scrollPosition.addingTimeInterval(length - 1))
+    }
+
+    /// Returns the canonical start of the current TDD page.
+    /// Day starts at midnight, week starts Sunday, month starts on the 1st,
+    /// and the 3-month view starts at the beginning of the current calendar quarter.
+    static func getInitialTDDScrollPosition(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Date {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        switch selectedInterval {
+        case .day:
+            return today
+        case .week:
+            let weekday = calendar.component(.weekday, from: today)
+            return calendar.date(byAdding: .day, value: -(weekday - 1), to: today) ?? today
+        case .month:
+            let components = calendar.dateComponents([.year, .month], from: today)
+            return calendar.date(from: components) ?? today
+        case .total:
+            let components = calendar.dateComponents([.year, .month], from: today)
+            guard let year = components.year, let month = components.month else { return today }
+            let startMonth = ((month - 1) / 3) * 3 + 1
+            return calendar.date(from: DateComponents(year: year, month: startMonth, day: 1)) ?? today
+        }
+    }
+
+    /// Returns the end boundary of the current canonical TDD page.
+    /// An invisible mark at this date lets Swift Charts display the complete current period,
+    /// even when future hours/days in that period do not have insulin data yet.
+    static func currentTDDPageEnd(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Date {
+        let start = getInitialTDDScrollPosition(for: selectedInterval)
+        let length = tddVisibleDomainLength(from: start, for: selectedInterval)
+        return start.addingTimeInterval(length)
+    }
+
+    /// Computes the visible date range based on the current scroll position and selected duration.
     /// - Parameters:
     ///   - scrollPosition: The current scroll position in the chart.
     ///   - selectedInterval: The selected time interval for statistics.
@@ -169,7 +235,7 @@ struct StatChartUtils {
     /// - Parameters:
     ///   - title: The title of the statistic.
     ///   - value: The formatted value to display.
-    /// - Returns: A `VStack` with the title and value.
+    /// - Returns: A `VStack` containing the title and value.
     static func statView(title: String, value: String) -> some View {
         VStack(spacing: 5) {
             Text(title)
