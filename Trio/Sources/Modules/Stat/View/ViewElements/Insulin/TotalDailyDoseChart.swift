@@ -170,6 +170,7 @@ struct TotalDailyDoseChart: View {
         } else {
             baseChart
                 .chartScrollableAxes(.horizontal)
+                .chartXVisibleDomain(length: StatChartUtils.visibleDomainLength(for: selectedInterval))
                 .chartScrollPosition(x: $scrollPosition)
                 .chartScrollTargetBehavior(
                     .valueAligned(
@@ -179,7 +180,6 @@ struct TotalDailyDoseChart: View {
                         majorAlignment: .matching(StatChartUtils.alignmentComponents(for: selectedInterval))
                     )
                 )
-                .chartXVisibleDomain(length: StatChartUtils.visibleDomainLength(for: selectedInterval))
                 .frame(height: 250)
         }
     }
@@ -240,7 +240,6 @@ struct TotalDailyDoseChart: View {
                 }
             }
         }
-        .chartXSelection(value: $selectedDate.animation(.easeInOut))
         .chartYAxis {
             AxisMarks(position: .trailing) { value in
                 if let amount = value.as(Double.self) {
