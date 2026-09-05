@@ -13,8 +13,9 @@ struct TotalDailyDoseChart: View {
 
     /// The current scroll position in the chart.
     @State private var scrollPosition = Date()
-    /// The scroll position where the current swipe began.
-    @State private var dragStartScrollPosition: Date?
+    /// The visible calendar-period duration. This is updated only when native snapping lands
+    /// on a new major calendar anchor, so month width does not mutate continuously during a drag.
+    @State private var visibleDomainLength: TimeInterval = 24 * 3600
     /// The currently selected date in the chart.
     @State private var selectedDate: Date?
     /// The actual chart plot's width in pixels.
@@ -30,9 +31,18 @@ struct TotalDailyDoseChart: View {
         self.tddStats = tddStats
     }
 
-    /// Computes the exact visible date range based on the current scroll position.
+    /// Computes the exact visible date range.
+    /// The 3-month view is a static latest-90-day overview; other views follow the scroll position.
     private var visibleDateRange: (start: Date, end: Date) {
-        StatChartUtils.tddVisibleDateRange(from: scrollPosition, for: selectedInterval)
+        if selectedInterval == .total {
+            let range = StatChartUtils.latest90DayTDDRange()
+            return (range.start, range.end)
+        }
+
+        return (
+            scrollPosition,
+            scrollPosition.addingTimeInterval(visibleDomainLength - 1)
+        )
     }
 
     /// The hourly/daily bars that are currently visible.
@@ -40,6 +50,11 @@ struct TotalDailyDoseChart: View {
         tddStats.filter { stat in
             stat.date >= visibleDateRange.start && stat.date <= visibleDateRange.end
         }
+    }
+
+    /// The bars supplied to the chart. The static 3-month overview is explicitly limited to the latest 90 days.
+    private var chartStats: [TDDStats] {
+        selectedInterval == .total ? visibleStats : tddStats
     }
 
     /// Sum of all visible insulin bars.
@@ -55,10 +70,9 @@ struct TotalDailyDoseChart: View {
         return nonZeroDoses.reduce(0, +) / Double(nonZeroDoses.count)
     }
 
-    /// The 3-month chart is normalized to three 31-day visual months.
-    /// Using the non-zero daily average preserves the rule that 0-U days do not dilute averages.
-    private var monthlyAverageDose: Double {
-        averageDose * 31
+    /// Normalized 30-day insulin amount based on the non-zero daily average.
+    private var thirtyDayAverageDose: Double {
+        averageDose * 30
     }
 
     private var averageLabel: String {
@@ -66,11 +80,11 @@ struct TotalDailyDoseChart: View {
     }
 
     private var secondaryLabel: String {
-        selectedInterval == .total ? "Monthly Average" : "Total"
+        selectedInterval == .total ? "30-Day Average" : "Total"
     }
 
     private var secondaryDose: Double {
-        selectedInterval == .total ? monthlyAverageDose : totalDose
+        selectedInterval == .total ? thirtyDayAverageDose : totalDose
     }
 
     private var chartTitle: String {
@@ -81,32 +95,48 @@ struct TotalDailyDoseChart: View {
     /// - Parameter date: The date for which to retrieve TDD data.
     /// - Returns: The `TDDStats` object if available, otherwise `nil`.
     private func getTDDForDate(_ date: Date) -> TDDStats? {
-        tddStats.first { stat in
+        chartStats.first { stat in
             StatChartUtils.isSameTimeUnit(stat.date, date, for: selectedInterval)
         }
     }
 
-    private func handleSwipeChanged() {
-        if dragStartScrollPosition == nil {
-            dragStartScrollPosition = scrollPosition
+    /// Reset the chart to the canonical current period for the selected interval.
+    private func resetChartWindow() {
+        let initial = StatChartUtils.getInitialTDDScrollPosition(for: selectedInterval)
+        scrollPosition = initial
+        visibleDomainLength = StatChartUtils.tddVisibleDomainLength(from: initial, for: selectedInterval)
+    }
+
+    /// Quantizes a native scroll-position binding back to the semantic major boundary.
+    /// Swift Charts can report a binding a few minutes off even when it has visually snapped,
+    /// so use a small tolerance rather than requiring exact midnight equality.
+    private func canonicalMajorAnchor(for date: Date) -> Date? {
+        guard selectedInterval != .total else { return nil }
+
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: date)
+        let midnightTolerance: TimeInterval = 15 * 60
+        guard abs(date.timeIntervalSince(dayStart)) <= midnightTolerance else { return nil }
+
+        switch selectedInterval {
+        case .day:
+            return dayStart
+        case .week:
+            return calendar.component(.weekday, from: dayStart) == 1 ? dayStart : nil
+        case .month:
+            return calendar.component(.day, from: dayStart) == 1 ? dayStart : nil
+        case .total:
+            return nil
         }
     }
 
-    private func handleSwipeEnded(_ value: DragGesture.Value) {
-        defer { dragStartScrollPosition = nil }
+    /// Update a variable calendar-period viewport only after native major snapping has completed.
+    private func updateVisibleDomainAfterNativeSnap(_ newPosition: Date) {
+        guard let anchor = canonicalMajorAnchor(for: newPosition) else { return }
+        let newLength = StatChartUtils.tddVisibleDomainLength(from: anchor, for: selectedInterval)
 
-        // A deliberate swipe gets semantic range snapping; a slower/smaller drag remains precisely scrollable.
-        let projectedTranslation = value.predictedEndTranslation.width
-        guard abs(projectedTranslation) >= 80 else { return }
-
-        let direction = projectedTranslation < 0 ? 1 : -1
-        let start = dragStartScrollPosition ?? scrollPosition
-        let target = StatChartUtils.tddSwipeTarget(from: start, for: selectedInterval, direction: direction)
-
-        DispatchQueue.main.async {
-            withAnimation(.snappy) {
-                scrollPosition = target
-            }
+        if abs(newLength - visibleDomainLength) > 1 {
+            visibleDomainLength = newLength
         }
     }
 
@@ -131,12 +161,14 @@ struct TotalDailyDoseChart: View {
             }
         }
         .onAppear {
-            scrollPosition = StatChartUtils.getInitialTDDScrollPosition(for: selectedInterval)
+            resetChartWindow()
         }
         .onChange(of: selectedInterval) {
             selectedDate = nil
-            dragStartScrollPosition = nil
-            scrollPosition = StatChartUtils.getInitialTDDScrollPosition(for: selectedInterval)
+            resetChartWindow()
+        }
+        .onChange(of: scrollPosition) { _, newPosition in
+            updateVisibleDomainAfterNativeSnap(newPosition)
         }
     }
 
@@ -161,7 +193,6 @@ struct TotalDailyDoseChart: View {
     }
 
     /// Keeps each value immediately adjacent to its label rather than sharing a variable-width Grid column.
-    /// This prevents longer labels such as "Monthly Average" from pushing the first row's value farther away.
     private func summaryRow(label: String, value: Double) -> some View {
         HStack(spacing: 4) {
             Text("\(label):")
@@ -170,10 +201,36 @@ struct TotalDailyDoseChart: View {
         }
     }
 
-    /// A view displaying raw hourly/daily insulin totals as bars.
-    private var chartsView: some View {
+    /// Applies either the native scroll/snap behavior or the static latest-90-day domain.
+    @ViewBuilder private var chartsView: some View {
+        if selectedInterval == .total {
+            let range = StatChartUtils.latest90DayTDDRange()
+
+            baseChart
+                .chartXScale(domain: range.start ... range.domainEnd)
+                .frame(height: 250)
+        } else {
+            baseChart
+                .chartScrollableAxes(.horizontal)
+                .chartScrollPosition(x: $scrollPosition)
+                .chartScrollTargetBehavior(
+                    .valueAligned(
+                        matching: StatChartUtils.tddMinorAlignmentComponents(for: selectedInterval),
+                        majorAlignment: .matching(
+                            StatChartUtils.tddMajorAlignmentComponents(for: selectedInterval)
+                        ),
+                        limitBehavior: .always
+                    )
+                )
+                .chartXVisibleDomain(length: visibleDomainLength)
+                .frame(height: 250)
+        }
+    }
+
+    /// A chart displaying raw hourly/daily insulin totals as bars.
+    private var baseChart: some View {
         Chart {
-            ForEach(tddStats) { stat in
+            ForEach(chartStats) { stat in
                 let isSunday = Calendar.current.component(.weekday, from: stat.date) == 1
                 let highlightSunday = (selectedInterval == .month || selectedInterval == .total) && isSunday
 
@@ -196,8 +253,8 @@ struct TotalDailyDoseChart: View {
                 )
             }
 
-            // Keep the complete current fixed window scrollable even when its future
-            // hours/days do not have insulin records yet.
+            // Keep the complete current day/week/month scrollable even before that period has finished.
+            // In 3-month mode this simply pins the end of the static latest-90-day domain.
             PointMark(
                 x: .value("Current Range End", StatChartUtils.currentTDDPageEnd(for: selectedInterval)),
                 y: .value("Boundary", 0)
@@ -226,6 +283,7 @@ struct TotalDailyDoseChart: View {
                 }
             }
         }
+        .chartXSelection(value: $selectedDate.animation(.easeInOut))
         .chartYAxis {
             AxisMarks(position: .trailing) { value in
                 if let amount = value.as(Double.self) {
@@ -253,7 +311,7 @@ struct TotalDailyDoseChart: View {
                         }
                     case .month:
                         let weekday = calendar.component(.weekday, from: date)
-                        if weekday == calendar.firstWeekday {
+                        if weekday == 1 {
                             AxisValueLabel(format: StatChartUtils.dateFormat(for: selectedInterval), centered: true)
                                 .font(.footnote)
                             AxisGridLine()
@@ -272,33 +330,11 @@ struct TotalDailyDoseChart: View {
                 }
             }
         }
-        .chartScrollableAxes(.horizontal)
-        .chartXSelection(value: $selectedDate.animation(.easeInOut))
-        .chartScrollPosition(x: $scrollPosition)
-        .chartScrollTargetBehavior(
-            .valueAligned(
-                matching: StatChartUtils.tddMinorAlignmentComponents(for: selectedInterval)
-            )
-        )
-        .chartXVisibleDomain(
-            length: StatChartUtils.tddVisibleDomainLength(from: scrollPosition, for: selectedInterval)
-        )
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 20)
-                .onChanged { _ in handleSwipeChanged() }
-                .onEnded(handleSwipeEnded)
-        )
-        .frame(height: 250)
     }
 }
 
 /// A popover view displaying TDD (Total Daily Dose) for a given time period.
 /// Shows the insulin amount in units (U) for an hourly or daily interval, depending on `selectedInterval`.
-///
-/// - Parameters:
-///   - date: The reference date for determining the displayed time range.
-///   - tdd: The TDDStats containing insulin usage data.
-///   - selectedInterval: The selected time interval (hourly or daily).
 private struct TDDSelectionPopover: View {
     let selectedDate: Date
     let tdd: TDDStats
@@ -327,25 +363,20 @@ private struct TDDSelectionPopover: View {
         guard domainDuration > 0, chartWidth > 0 else { return 0 }
 
         let popoverWidth = popoverSize.width
-        let padding: CGFloat = 10 // Padding from screen edges
+        let padding: CGFloat = 10
 
-        // Convert dates to pixel'd x-position
         let dateFraction = selectedDate.timeIntervalSince(domain.start) / domainDuration
-        let x_selected = dateFraction * chartWidth
+        let xSelected = dateFraction * chartWidth
 
-        // Calculate popover edges
-        let x_left = x_selected - (popoverWidth / 2)
-        let x_right = x_selected + (popoverWidth / 2)
+        let xLeft = xSelected - (popoverWidth / 2)
+        let xRight = xSelected + (popoverWidth / 2)
 
         var offset: CGFloat = 0
 
-        // Ensure the popover stays within screen bounds
-        if x_left < padding {
-            // Popover would extend past left edge, shift it right
-            offset = padding - x_left
-        } else if x_right > chartWidth - padding {
-            // Popover would extend past right edge, shift it left
-            offset = (chartWidth - padding) - x_right
+        if xLeft < padding {
+            offset = padding - xLeft
+        } else if xRight > chartWidth - padding {
+            offset = (chartWidth - padding) - xRight
         }
 
         return offset
@@ -376,7 +407,7 @@ private struct TDDSelectionPopover: View {
                         .stroke(Color.blue, lineWidth: 2)
                 )
         }
-        .frame(minWidth: 100, maxWidth: .infinity) // Ensures proper width
+        .frame(minWidth: 100, maxWidth: .infinity)
         .background(
             GeometryReader { geo in
                 Color.clear
@@ -384,9 +415,7 @@ private struct TDDSelectionPopover: View {
                     .onChange(of: geo.size) { _, newValue in popoverSize = newValue }
             }
         )
-        // Apply calculated xOffset to keep within bounds
         .offset(x: xOffset(), y: 0)
-        // Hide popover if selected date is outside visible domain
         .opacity(selectedDate >= domain.start && selectedDate <= domain.end ? 1 : 0)
     }
 }
