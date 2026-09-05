@@ -177,7 +177,8 @@ struct TotalDailyDoseChart: View {
                         matching: selectedInterval == .day ?
                             DateComponents(minute: 0) :
                             DateComponents(hour: 0),
-                        majorAlignment: .matching(StatChartUtils.alignmentComponents(for: selectedInterval))
+                        majorAlignment: .matching(StatChartUtils.alignmentComponents(for: selectedInterval)),
+                        limitBehavior: .always
                     )
                 )
                 .frame(height: 250)
