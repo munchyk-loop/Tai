@@ -29,7 +29,7 @@ struct TotalDailyDoseChart: View {
     }
 
     /// Computes the exact visible date range.
-    /// The 3-month view is a static latest-90-day overview; scrolling views use the native visible-domain length.
+    /// The 3-month view is a static latest-90-day overview; scrolling views use a fixed native visible-domain length.
     private var visibleDateRange: (start: Date, end: Date) {
         if selectedInterval == .total {
             let range = StatChartUtils.latest90DayTDDRange()
@@ -38,6 +38,15 @@ struct TotalDailyDoseChart: View {
 
         let length = StatChartUtils.visibleDomainLength(for: selectedInterval)
         return (scrollPosition, scrollPosition.addingTimeInterval(length - 1))
+    }
+
+    /// The end boundary of the visible domain, matching Swift Charts' fixed-domain paging model.
+    private var visibleDomainEnd: Date {
+        if selectedInterval == .total {
+            return StatChartUtils.latest90DayTDDRange().domainEnd
+        }
+
+        return scrollPosition.addingTimeInterval(StatChartUtils.visibleDomainLength(for: selectedInterval))
     }
 
     /// The hourly/daily bars that are currently visible.
@@ -84,6 +93,31 @@ struct TotalDailyDoseChart: View {
 
     private var chartTitle: String {
         selectedInterval == .day ? "Total Hourly Dose (U)" : "Total Daily Dose (U)"
+    }
+
+    /// Health-style range label: a month name when exactly aligned to the first of a month,
+    /// otherwise the literal fixed visible-domain range while precision scrolling.
+    private var visibleRangeLabel: String {
+        guard selectedInterval == .month else {
+            return StatChartUtils.formatVisibleDateRange(
+                from: visibleDateRange.start,
+                to: visibleDateRange.end,
+                for: selectedInterval
+            )
+        }
+
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: scrollPosition)
+        let isMonthAnchor = calendar.component(.day, from: startOfDay) == 1 &&
+            abs(scrollPosition.timeIntervalSince(startOfDay)) < 60
+
+        if isMonthAnchor {
+            return startOfDay.formatted(.dateTime.month(.abbreviated).year())
+        }
+
+        let start = scrollPosition.formatted(.dateTime.month(.abbreviated).day())
+        let end = visibleDomainEnd.formatted(.dateTime.month(.abbreviated).day().year())
+        return "\(start)–\(end)"
     }
 
     /// Retrieves the TDD statistic for a given date.
@@ -140,12 +174,9 @@ struct TotalDailyDoseChart: View {
 
             Spacer()
 
-            Text(
-                StatChartUtils
-                    .formatVisibleDateRange(from: visibleDateRange.start, to: visibleDateRange.end, for: selectedInterval)
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
+            Text(visibleRangeLabel)
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -158,7 +189,7 @@ struct TotalDailyDoseChart: View {
         }
     }
 
-    /// Uses Swift Charts' built-in scrolling and value-aligned swipe behavior.
+    /// Uses Swift Charts' built-in scrolling with fixed visible domains and native page-aligned swipes.
     /// The 3-month view remains a static latest-90-day overview.
     @ViewBuilder private var chartsView: some View {
         if selectedInterval == .total {
@@ -177,7 +208,7 @@ struct TotalDailyDoseChart: View {
                         matching: selectedInterval == .day ?
                             DateComponents(minute: 0) :
                             DateComponents(hour: 0),
-                        majorAlignment: .matching(StatChartUtils.alignmentComponents(for: selectedInterval)),
+                        majorAlignment: .page,
                         limitBehavior: .always
                     )
                 )
