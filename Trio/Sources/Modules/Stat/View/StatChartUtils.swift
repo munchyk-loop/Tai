@@ -97,7 +97,7 @@ struct StatChartUtils {
             return DateComponents(hour: 0, minute: 0, second: 0)
         case .week:
             // Calendar weekday 1 is Sunday, independent of locale firstWeekday.
-            return DateComponents(weekday: 1, hour: 0, minute: 0, second: 0)
+            return DateComponents(hour: 0, minute: 0, second: 0, weekday: 1)
         case .month:
             return DateComponents(day: 1, hour: 0, minute: 0, second: 0)
         case .total:
@@ -351,7 +351,7 @@ struct StatChartUtils {
     /// - Parameters:
     ///   - label: The text label for the legend item.
     ///   - color: The color associated with the legend item.
-    /// - Returns: A SwiftUI view displaying a colored symbol and a label.
+    /// - Returns: A `VStack` containing the title and value.
     @ViewBuilder static func legendItem(label: String, color: Color) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "circle.fill").foregroundStyle(color)
