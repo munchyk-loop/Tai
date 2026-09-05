@@ -29,7 +29,7 @@ struct TotalDailyDoseChart: View {
     }
 
     /// Computes the exact visible date range.
-    /// The 3-month view is a static latest-90-day overview; scrolling views use a fixed native visible-domain length.
+    /// The 3-month view is a static latest-90-day overview; scrolling views use fixed visible-domain lengths.
     private var visibleDateRange: (start: Date, end: Date) {
         if selectedInterval == .total {
             let range = StatChartUtils.latest90DayTDDRange()
@@ -40,7 +40,7 @@ struct TotalDailyDoseChart: View {
         return (scrollPosition, scrollPosition.addingTimeInterval(length - 1))
     }
 
-    /// The end boundary of the visible domain, matching Swift Charts' fixed-domain paging model.
+    /// The end boundary of the fixed visible domain.
     private var visibleDomainEnd: Date {
         if selectedInterval == .total {
             return StatChartUtils.latest90DayTDDRange().domainEnd
@@ -49,34 +49,31 @@ struct TotalDailyDoseChart: View {
         return scrollPosition.addingTimeInterval(StatChartUtils.visibleDomainLength(for: selectedInterval))
     }
 
-    /// The hourly/daily bars that are currently visible.
-    private var visibleStats: [TDDStats] {
-        tddStats.filter { stat in
-            stat.date >= visibleDateRange.start && stat.date <= visibleDateRange.end
-        }
-    }
-
     /// The bars supplied to the chart. The static 3-month overview is explicitly limited to the latest 90 days.
     private var chartStats: [TDDStats] {
-        selectedInterval == .total ? visibleStats : tddStats
+        guard selectedInterval == .total else { return tddStats }
+        let range = StatChartUtils.latest90DayTDDRange()
+        return tddStats.filter { $0.date >= range.start && $0.date <= range.end }
     }
 
-    /// Sum of all visible insulin bars.
-    private var totalDose: Double {
-        visibleStats.reduce(0) { $0 + $1.amount }
-    }
+    /// Computes both visible summary values in one pass so scroll-position updates do not repeatedly
+    /// filter the full data set for average and total independently.
+    private var visibleSummary: (average: Double, total: Double) {
+        let range = visibleDateRange
+        var total = 0.0
+        var nonZeroTotal = 0.0
+        var nonZeroCount = 0
 
-    /// Arithmetic mean of visible non-zero insulin bars.
-    /// Zero-dose hours/days are intentionally excluded from both numerator and denominator.
-    private var averageDose: Double {
-        let nonZeroDoses = visibleStats.map(\.amount).filter { $0 > 0 }
-        guard !nonZeroDoses.isEmpty else { return 0 }
-        return nonZeroDoses.reduce(0, +) / Double(nonZeroDoses.count)
-    }
+        for stat in tddStats where stat.date >= range.start && stat.date <= range.end {
+            total += stat.amount
+            if stat.amount > 0 {
+                nonZeroTotal += stat.amount
+                nonZeroCount += 1
+            }
+        }
 
-    /// Normalized 30-day insulin amount based on the non-zero daily average.
-    private var thirtyDayAverageDose: Double {
-        averageDose * 30
+        let average = nonZeroCount > 0 ? nonZeroTotal / Double(nonZeroCount) : 0
+        return (average, total)
     }
 
     private var averageLabel: String {
@@ -87,16 +84,12 @@ struct TotalDailyDoseChart: View {
         selectedInterval == .total ? "30-Day Average" : "Total"
     }
 
-    private var secondaryDose: Double {
-        selectedInterval == .total ? thirtyDayAverageDose : totalDose
-    }
-
     private var chartTitle: String {
         selectedInterval == .day ? "Total Hourly Dose (U)" : "Total Daily Dose (U)"
     }
 
-    /// Health-style range label: a month name when exactly aligned to the first of a month,
-    /// otherwise the literal fixed visible-domain range while precision scrolling.
+    /// Health-style Month label: just the month when exactly aligned to the first,
+    /// otherwise the literal fixed 30-day range during precision scrolling.
     private var visibleRangeLabel: String {
         guard selectedInterval == .month else {
             return StatChartUtils.formatVisibleDateRange(
@@ -112,11 +105,11 @@ struct TotalDailyDoseChart: View {
             abs(scrollPosition.timeIntervalSince(startOfDay)) < 60
 
         if isMonthAnchor {
-            return startOfDay.formatted(.dateTime.month(.abbreviated).year())
+            return startOfDay.formatted(.dateTime.month(.abbreviated))
         }
 
         let start = scrollPosition.formatted(.dateTime.month(.abbreviated).day())
-        let end = visibleDomainEnd.formatted(.dateTime.month(.abbreviated).day().year())
+        let end = visibleDomainEnd.formatted(.dateTime.month(.abbreviated).day())
         return "\(start)–\(end)"
     }
 
@@ -165,9 +158,12 @@ struct TotalDailyDoseChart: View {
 
     /// A view displaying the average and secondary summary for the exact bars in the visible range.
     private var statsView: some View {
-        HStack {
+        let summary = visibleSummary
+        let secondaryDose = selectedInterval == .total ? summary.average * 30 : summary.total
+
+        return HStack {
             VStack(alignment: .leading, spacing: 4) {
-                summaryRow(label: averageLabel, value: averageDose)
+                summaryRow(label: averageLabel, value: summary.average)
                 summaryRow(label: secondaryLabel, value: secondaryDose)
             }
             .font(.headline)
@@ -189,7 +185,8 @@ struct TotalDailyDoseChart: View {
         }
     }
 
-    /// Uses Swift Charts' built-in scrolling with fixed visible domains and native page-aligned swipes.
+    /// Uses Swift Charts' built-in value-aligned scrolling with fixed visible domains.
+    /// Swipes target true calendar boundaries: midnight, the first day of the week, or the first of the month.
     /// The 3-month view remains a static latest-90-day overview.
     @ViewBuilder private var chartsView: some View {
         if selectedInterval == .total {
@@ -208,7 +205,7 @@ struct TotalDailyDoseChart: View {
                         matching: selectedInterval == .day ?
                             DateComponents(minute: 0) :
                             DateComponents(hour: 0),
-                        majorAlignment: .page,
+                        majorAlignment: .matching(StatChartUtils.alignmentComponents(for: selectedInterval)),
                         limitBehavior: .always
                     )
                 )
