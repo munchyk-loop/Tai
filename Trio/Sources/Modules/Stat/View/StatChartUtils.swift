@@ -15,32 +15,30 @@ struct StatChartUtils {
         }
     }
 
-    /// Returns the TDD chart's fixed visual window length using calendar-day arithmetic.
-    /// Month always displays 31 day slots and 3-month always displays 93 day slots.
-    /// Calendar arithmetic keeps midnight boundaries correct across DST changes.
+    /// Returns the exact calendar duration of the canonical TDD period beginning at `anchor`.
+    /// Month uses one real calendar month, so February through 31-day months each fill the viewport.
     static func tddVisibleDomainLength(
-        from scrollPosition: Date,
+        from anchor: Date,
         for selectedInterval: Stat.StateModel.StatsTimeInterval
     ) -> TimeInterval {
         let calendar = Calendar.current
-        let dayCount: Int
+        let end: Date?
 
         switch selectedInterval {
         case .day:
-            dayCount = 1
+            end = calendar.date(byAdding: .day, value: 1, to: anchor)
         case .week:
-            dayCount = 7
+            end = calendar.date(byAdding: .day, value: 7, to: anchor)
         case .month:
-            dayCount = 31
+            end = calendar.date(byAdding: .month, value: 1, to: anchor)
         case .total:
-            dayCount = 93
+            end = calendar.date(byAdding: .day, value: 90, to: anchor)
         }
 
-        let end = calendar.date(byAdding: .day, value: dayCount, to: scrollPosition)
-        return end?.timeIntervalSince(scrollPosition) ?? TimeInterval(dayCount * 24 * 3600)
+        return end?.timeIntervalSince(anchor) ?? visibleDomainLength(for: selectedInterval)
     }
 
-    /// Computes the exact visible range for the TDD chart without expanding it to an extra day.
+    /// Computes the visible range for a TDD scroll position using its canonical period length.
     static func tddVisibleDateRange(
         from scrollPosition: Date,
         for selectedInterval: Stat.StateModel.StatsTimeInterval
@@ -49,9 +47,19 @@ struct StatChartUtils {
         return (scrollPosition, scrollPosition.addingTimeInterval(length - 1))
     }
 
+    /// The static latest-90-calendar-day range used by the 3-month TDD overview.
+    /// The range includes today and the preceding 89 calendar days.
+    static func latest90DayTDDRange(referenceDate: Date = Date()) -> (start: Date, end: Date, domainEnd: Date) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: referenceDate)
+        let start = calendar.date(byAdding: .day, value: -89, to: today) ?? today
+        let domainEnd = calendar.date(byAdding: .day, value: 1, to: today) ?? referenceDate
+        return (start, domainEnd.addingTimeInterval(-1), domainEnd)
+    }
+
     /// Returns the canonical initial start of the TDD chart.
     /// Day starts at midnight, week starts Sunday, month starts on the 1st,
-    /// and 3-month starts on the 1st two months before the current month.
+    /// and 3-month starts 89 days before today for its static 90-day overview.
     static func getInitialTDDScrollPosition(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Date {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -64,49 +72,58 @@ struct StatChartUtils {
         case .month:
             return monthStart(for: today)
         case .total:
-            let currentMonthStart = monthStart(for: today)
-            return calendar.date(byAdding: .month, value: -2, to: currentMonthStart) ?? currentMonthStart
+            return latest90DayTDDRange().start
         }
     }
 
-    /// Fine-grained alignment used after a precise drag.
-    /// Day can settle on an hour; longer views can settle on any midnight.
+    /// Fine-grained alignment for precise scrolling.
+    /// Day settles on whole hours; week/month settle on whole days.
     static func tddMinorAlignmentComponents(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
         switch selectedInterval {
         case .day:
-            return DateComponents(minute: 0)
+            return DateComponents(minute: 0, second: 0)
         case .week,
              .month,
              .total:
-            return DateComponents(hour: 0)
+            return DateComponents(hour: 0, minute: 0, second: 0)
         }
     }
 
-    /// Returns the next/previous canonical range start for a deliberate swipe.
-    /// The fixed visual widths remain 1/7/31/93 days, while the snap anchors stay semantic:
-    /// midnight, Sunday, or month-start. The 93-day view advances one month at a time
-    /// so users can choose overlapping consecutive-month windows.
-    static func tddSwipeTarget(
-        from date: Date,
-        for selectedInterval: Stat.StateModel.StatsTimeInterval,
-        direction: Int
-    ) -> Date {
+    /// Calendar-major alignment used by Swift Charts specifically for swipe gestures.
+    /// This is separate from the minor alignment used for precise scrolling.
+    static func tddMajorAlignmentComponents(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
+        switch selectedInterval {
+        case .day:
+            return DateComponents(hour: 0, minute: 0, second: 0)
+        case .week:
+            // Calendar weekday 1 is Sunday, independent of locale firstWeekday.
+            return DateComponents(weekday: 1, hour: 0, minute: 0, second: 0)
+        case .month:
+            return DateComponents(day: 1, hour: 0, minute: 0, second: 0)
+        case .total:
+            // 3-month is not scrollable, but return a valid month boundary for API completeness.
+            return DateComponents(day: 1, hour: 0, minute: 0, second: 0)
+        }
+    }
+
+    /// True when a native scroll target has landed on the canonical major boundary.
+    /// Used to update variable calendar-period viewport lengths only after snapping completes.
+    static func isTDDMajorAnchor(_ date: Date, for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Bool {
+        guard selectedInterval != .total else { return false }
+
         let calendar = Calendar.current
-        let step = direction >= 0 ? 1 : -1
+        let dayStart = calendar.startOfDay(for: date)
+        guard abs(date.timeIntervalSince(dayStart)) < 2 else { return false }
 
         switch selectedInterval {
         case .day:
-            let start = calendar.startOfDay(for: date)
-            return calendar.date(byAdding: .day, value: step, to: start) ?? start
+            return true
         case .week:
-            let start = sundayStart(for: date)
-            return calendar.date(byAdding: .day, value: 7 * step, to: start) ?? start
+            return calendar.component(.weekday, from: date) == 1
         case .month:
-            let start = monthStart(for: date)
-            return calendar.date(byAdding: .month, value: step, to: start) ?? start
+            return calendar.component(.day, from: date) == 1
         case .total:
-            let start = monthStart(for: date)
-            return calendar.date(byAdding: .month, value: step, to: start) ?? start
+            return false
         }
     }
 
@@ -124,9 +141,12 @@ struct StatChartUtils {
     }
 
     /// Returns the end boundary of the current canonical TDD window.
-    /// An invisible mark at this date lets Swift Charts display the complete current period,
-    /// even when future hours/days in that period do not have insulin data yet.
+    /// An invisible mark at this date lets Swift Charts display future empty slots in the current period.
     static func currentTDDPageEnd(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Date {
+        if selectedInterval == .total {
+            return latest90DayTDDRange().domainEnd
+        }
+
         let start = getInitialTDDScrollPosition(for: selectedInterval)
         let length = tddVisibleDomainLength(from: start, for: selectedInterval)
         return start.addingTimeInterval(length)
