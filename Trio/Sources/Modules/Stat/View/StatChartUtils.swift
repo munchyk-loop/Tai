@@ -76,57 +76,6 @@ struct StatChartUtils {
         }
     }
 
-    /// Fine-grained alignment for precise scrolling.
-    /// Day settles on whole hours; week/month settle on whole days.
-    static func tddMinorAlignmentComponents(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
-        switch selectedInterval {
-        case .day:
-            return DateComponents(minute: 0, second: 0)
-        case .week,
-             .month,
-             .total:
-            return DateComponents(hour: 0, minute: 0, second: 0)
-        }
-    }
-
-    /// Calendar-major alignment used by Swift Charts specifically for swipe gestures.
-    /// This is separate from the minor alignment used for precise scrolling.
-    static func tddMajorAlignmentComponents(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
-        switch selectedInterval {
-        case .day:
-            return DateComponents(hour: 0, minute: 0, second: 0)
-        case .week:
-            // Calendar weekday 1 is Sunday, independent of locale firstWeekday.
-            return DateComponents(hour: 0, minute: 0, second: 0, weekday: 1)
-        case .month:
-            return DateComponents(day: 1, hour: 0, minute: 0, second: 0)
-        case .total:
-            // 3-month is not scrollable, but return a valid month boundary for API completeness.
-            return DateComponents(day: 1, hour: 0, minute: 0, second: 0)
-        }
-    }
-
-    /// True when a native scroll target has landed on the canonical major boundary.
-    /// Used to update variable calendar-period viewport lengths only after snapping completes.
-    static func isTDDMajorAnchor(_ date: Date, for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Bool {
-        guard selectedInterval != .total else { return false }
-
-        let calendar = Calendar.current
-        let dayStart = calendar.startOfDay(for: date)
-        guard abs(date.timeIntervalSince(dayStart)) < 2 else { return false }
-
-        switch selectedInterval {
-        case .day:
-            return true
-        case .week:
-            return calendar.component(.weekday, from: date) == 1
-        case .month:
-            return calendar.component(.day, from: date) == 1
-        case .total:
-            return false
-        }
-    }
-
     private static func sundayStart(for date: Date) -> Date {
         let calendar = Calendar.current
         let dayStart = calendar.startOfDay(for: date)
@@ -196,9 +145,9 @@ struct StatChartUtils {
         }
     }
 
-    /// Returns DateComponents for aligning dates based on the selected duration.
+    /// Returns DateComponents for Swift Charts' native major alignment.
     /// - Parameter selectedInterval: The selected time interval for statistics.
-    /// - Returns: DateComponents configured for the appropriate alignment.
+    /// - Returns: DateComponents configured for the appropriate calendar boundary.
     static func alignmentComponents(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
         switch selectedInterval {
         case .day: return DateComponents(hour: 0)
@@ -351,7 +300,7 @@ struct StatChartUtils {
     /// - Parameters:
     ///   - label: The text label for the legend item.
     ///   - color: The color associated with the legend item.
-    /// - Returns: A `VStack` containing the title and value.
+    /// - Returns: A SwiftUI view displaying a colored symbol and a label.
     @ViewBuilder static func legendItem(label: String, color: Color) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "circle.fill").foregroundStyle(color)
