@@ -174,13 +174,14 @@ struct TotalDailyDoseChart: View {
     private var chartsView: some View {
         Chart {
             ForEach(tddStats) { stat in
-                let isWeekend = Calendar.current.isDateInWeekend(stat.date)
+                let isSunday = Calendar.current.component(.weekday, from: stat.date) == 1
+                let highlightSunday = (selectedInterval == .month || selectedInterval == .total) && isSunday
 
                 BarMark(
                     x: .value("Date", stat.date, unit: selectedInterval == .day ? .hour : .day),
                     y: .value("Amount", stat.amount)
                 )
-                .foregroundStyle(isWeekend ? Color.basal : Color.insulin)
+                .foregroundStyle(highlightSunday ? Color.basal : Color.insulin)
                 .annotation(position: .top) {
                     if selectedInterval == .week {
                         Text(stat.amount.formatted(.number.precision(.fractionLength(1))))
