@@ -1,5 +1,4 @@
 import Charts
-import Combine
 import SwiftUI
 
 /// Actual hourly or daily insulin totals, with native calendar-aligned scrolling.
@@ -8,7 +7,7 @@ struct TotalDailyDoseChart: View {
     let tddStats: [TDDStats]
 
     // Live offsets are deliberately not published. Only a settled range updates the header.
-    @StateObject private var scrolling: TDDChartScrollPosition
+    @State private var scrolling: TDDChartScrollPosition
     @State private var displayedRange: Range<Date>
     @State private var summary: TDDChartData.Summary
     @State private var selectedDate: Date?
@@ -25,7 +24,7 @@ struct TotalDailyDoseChart: View {
         let interval = selectedInterval.wrappedValue
         let initial = TDDChartData.initialPosition(for: interval)
         let range = interval == .total ? TDDChartData.recentRange() : TDDChartData.visibleRange(from: initial, for: interval)
-        _scrolling = StateObject(wrappedValue: TDDChartScrollPosition(position: initial))
+        _scrolling = State(initialValue: TDDChartScrollPosition(position: initial))
         _displayedRange = State(initialValue: range)
         _summary = State(initialValue: TDDChartData.summary(of: tddStats, in: range))
     }
@@ -103,7 +102,7 @@ struct TotalDailyDoseChart: View {
         if selectedInterval == .total {
             // This is the complete retained history, not a window into a scrollable chart.
             chart
-        } else if #available(iOS 18.0, *) {
+        } else {
             scrollableChart.onScrollPhaseChange { _, phase in
                 scrolling.isScrolling = phase != .idle
                 if phase == .idle {
@@ -113,8 +112,6 @@ struct TotalDailyDoseChart: View {
                     }
                 }
             }
-        } else {
-            scrollableChart
         }
     }
 
@@ -125,7 +122,7 @@ struct TotalDailyDoseChart: View {
                 get: { scrolling.position },
                 set: {
                     if selectedDate != nil { selectedDate = nil }
-                    scrolling.move(to: $0)
+                    scrolling.position = $0
                 }
             ))
             .chartScrollTargetBehavior(
@@ -138,14 +135,6 @@ struct TotalDailyDoseChart: View {
             )
             // Keep the scale length stable throughout dragging and deceleration.
             .chartXVisibleDomain(length: displayedRange.upperBound.timeIntervalSince(displayedRange.lowerBound))
-            .onReceive(scrolling.positions.debounce(for: .milliseconds(250), scheduler: RunLoop.main)) { _ in
-                // iOS 17 lacks scroll phases. This also covers programmatic changes with no phase event.
-                if #available(iOS 18.0, *) {
-                    guard !scrolling.isScrolling else { return }
-                }
-                scrolling.isScrolling = false
-                updateSummary()
-            }
     }
 
     private var chart: some View {
@@ -253,19 +242,11 @@ private struct TDDSelectionPopover: View {
 
 /// Swift Charts owns gestures, targets and deceleration. This stores its reported position
 /// without publishing every frame to the chart and header.
-private final class TDDChartScrollPosition: ObservableObject {
+private final class TDDChartScrollPosition {
     var position: Date
     var isScrolling = false
-    let positions = PassthroughSubject<Date, Never>()
 
     init(position: Date) {
         self.position = position
-    }
-
-    func move(to position: Date) {
-        guard self.position != position else { return }
-        self.position = position
-        if #unavailable(iOS 18.0) { isScrolling = true }
-        positions.send(position)
     }
 }

@@ -13,7 +13,7 @@ Based on `munchyk-loop/Tai` branch `dev-(TAI)`, commit `eaccc8fe1e119626bc949415
 
 Swift Charts handles gestures and deceleration with `valueAligned(matching:majorAlignment:limitBehavior:)`. D/W use native `.page` major alignment over an explicitly midnight/Sunday-aligned domain. M uses `DateComponents(day: 1)` major alignment. Slow scrolling retains individual-hour alignment in D and individual-day alignment in W/M. Calendar matching specifies only the intended component, following Apple's examples. The chart receives the same Sunday-first calendar and local time zone used for range calculation.
 
-Live scroll offsets are stored without publishing changes to the view. The range and summary are committed on SwiftUI's idle scroll phase (iOS 18+); Combine debounces offsets for iOS 17 and programmatic changes without phase events. The visible-domain length stays fixed during dragging/deceleration. No gesture recognizer, velocity threshold, custom scroll-target behavior, or UIKit scroll-view introspection is used.
+Live scroll offsets are stored without publishing changes to the view. The app's minimum iOS version is 18. The range and summary are committed on SwiftUI's native idle scroll phase, with no timer or debounce fallback. Picker and data changes update the summary directly. The visible-domain length stays fixed during dragging/deceleration. No gesture recognizer, velocity threshold, custom scroll-target behavior, or UIKit scroll-view introspection is used.
 
 3 M is a static chart with a rolling 90-day domain ending after today. It has no scroll-position, visible-window, or scrolling modifiers. The existing SwiftUI segmented picker is retained.
 
@@ -32,7 +32,7 @@ Sunday has an accent color only in M and 3 M; Saturday uses the ordinary bar col
 ## Validation performed
 
 - 15 Swift Testing tests passed, including parameterized cases for leap years, time zones, DST, empty/zero data, exclusive range ends, custom ranges, monthly averages, Sunday accents, rolling history, and whole-hour labels.
-- Production chart and range/summary source type-checked against the iOS SDK, targeting iOS 17. The surrounding app enum and asset colors were supplied by a small standalone validation harness; the chart and calculation source were unchanged.
+- Production chart and range/summary source type-checked against the iOS SDK, targeting iOS 18. The surrounding app enum and asset colors were supplied by a small standalone validation harness; the chart and calculation source were unchanged.
 - Day and week selection popover layouts rendered with SwiftUI ImageRenderer and inspected. The macOS rendering harness substitutes an AppKit color for the iOS semantic background; it does not validate iOS touch interactions.
 - Patch whitespace checked. Existing source and test target registrations are retained.
 
