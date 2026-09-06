@@ -21,8 +21,17 @@ struct TotalDailyDoseChart: View {
     @State private var committedStart = Date()
     /// Debounce that holds header updates back until scrolling actually stops.
     @State private var settleTask: Task<Void, Never>?
-    /// The currently selected date in the chart.
-    @State private var selectedDate: Date?
+    /// The raw selection reported by the chart, anywhere along the x axis.
+    @State private var rawSelection: Date?
+
+    /// The start of the bar the selection falls in, or nil when nothing is selected.
+    ///
+    /// The chart reports a continuous position, so this rounds onto the containing bar and
+    /// keeps the popover locked to a single bar instead of drifting between two.
+    private var selectedBarStart: Date? {
+        rawSelection.map { StatChartUtils.insulinSnapToBar($0, for: selectedInterval) }
+    }
+
     /// The actual chart plot's width in pixel
     @State private var chartWidth: CGFloat = 0
 
@@ -56,7 +65,7 @@ struct TotalDailyDoseChart: View {
     /// Jumps straight to the start of the current period, without waiting for the debounce.
     private func resetToCurrentPeriod() {
         settleTask?.cancel()
-        selectedDate = nil
+        rawSelection = nil
         let start = StatChartUtils.insulinInitialScrollPosition(for: selectedInterval)
         scrollPosition = start
         committedStart = start
@@ -219,17 +228,18 @@ struct TotalDailyDoseChart: View {
                     }
                 }
                 .opacity(
-                    selectedDate.map { date in
+                    selectedBarStart.map { date in
                         StatChartUtils.isSameTimeUnit(stat.date, date, for: selectedInterval) ? 1 : 0.3
                     } ?? 1
                 )
             }
 
-            if let selectedDate,
-               let selectedTDD = getTDDForDate(selectedDate)
+            if let selectedBarStart,
+               let selectedTDD = getTDDForDate(selectedBarStart)
             {
                 RuleMark(
-                    x: .value("Selected Date", selectedDate)
+                    // Centred in the bar, not on its leading edge.
+                    x: .value("Selected Date", StatChartUtils.insulinBarCenter(selectedBarStart, for: selectedInterval))
                 )
                 .foregroundStyle(Color.insulin.opacity(0.5))
                 .annotation(
@@ -238,7 +248,7 @@ struct TotalDailyDoseChart: View {
                     overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
                 ) {
                     TDDSelectionPopover(
-                        selectedDate: selectedDate,
+                        selectedDate: selectedBarStart,
                         tdd: selectedTDD,
                         selectedInterval: selectedInterval,
                         domain: visibleDateRange,
@@ -298,6 +308,14 @@ struct TotalDailyDoseChart: View {
         .chartXScale(domain: scrollDomain)
         .chartScrollableAxes(.horizontal)
         .chartScrollPosition(x: $scrollPosition)
+        // Charts' own selection, which the chart coordinates with its own scroll handling.
+        //
+        // Do not replace this with a hand-rolled `chartGesture`. A LongPressGesture sequenced
+        // before a DragGesture was tried here and it swallowed one-finger touches before the
+        // scroll view ever saw them: the chart could then only be scrolled with two fingers,
+        // and because the sequenced drag has to exist before the gesture reports anything, a
+        // stationary press showed no popover at all.
+        .chartXSelection(value: $rawSelection.animation(.easeInOut))
         .chartXVisibleDomain(length: StatChartUtils.insulinVisibleDomainLength(for: selectedInterval))
         .chartScrollTargetBehavior(
             InsulinPagingScrollBehavior(
@@ -305,26 +323,6 @@ struct TotalDailyDoseChart: View {
                 interval: selectedInterval
             )
         )
-        // Selection is deliberately behind a long press. `chartXSelection` also reacts to a
-        // plain drag, which fights the scroll gesture: the popover kept firing when the user
-        // was only trying to scroll. Requiring a hold first leaves ordinary drags to the
-        // scroll view, and matches the "tap and hold a bar" hint under the chart.
-        .chartGesture { proxy in
-            LongPressGesture(minimumDuration: 0.2)
-                .sequenced(before: DragGesture(minimumDistance: 0))
-                .onChanged { phase in
-                    guard case let .second(_, drag?) = phase else { return }
-                    guard let date: Date = proxy.value(atX: drag.location.x) else { return }
-                    // Lock the popover onto the bar under the finger rather than tracking a
-                    // continuous position between bars.
-                    withAnimation(.easeInOut(duration: 0.1)) {
-                        selectedDate = StatChartUtils.insulinSnapToBar(date, for: selectedInterval)
-                    }
-                }
-                .onEnded { _ in
-                    withAnimation(.easeInOut) { selectedDate = nil }
-                }
-        }
         .frame(height: 250)
     }
 }
@@ -345,6 +343,11 @@ private struct TDDSelectionPopover: View {
 
     @State private var popoverSize: CGSize = .zero
 
+    /// The middle of the selected bar, which is where the rule mark is drawn.
+    private var barCenter: Date {
+        StatChartUtils.insulinBarCenter(selectedDate, for: selectedInterval)
+    }
+
     @Environment(\.colorScheme) var colorScheme
 
     private var timeText: String {
@@ -358,7 +361,7 @@ private struct TDDSelectionPopover: View {
 
     private func xOffset() -> CGFloat {
         // If the selected date is outside the visible domain, hide the popover
-        guard selectedDate >= domain.start && selectedDate <= domain.end else { return 0 }
+        guard barCenter >= domain.start && barCenter <= domain.end else { return 0 }
 
         let domainDuration = domain.end.timeIntervalSince(domain.start)
         guard domainDuration > 0, chartWidth > 0 else { return 0 }
@@ -367,7 +370,7 @@ private struct TDDSelectionPopover: View {
         let padding: CGFloat = 10 // Padding from screen edges
 
         // Convert dates to pixel'd x-position
-        let dateFraction = selectedDate.timeIntervalSince(domain.start) / domainDuration
+        let dateFraction = barCenter.timeIntervalSince(domain.start) / domainDuration
         let x_selected = dateFraction * chartWidth
 
         // Calculate popover edges
@@ -424,6 +427,6 @@ private struct TDDSelectionPopover: View {
         // Apply calculated xOffset to keep within bounds
         .offset(x: xOffset(), y: 0)
         // Hide popover if selected date is outside visible domain
-        .opacity(selectedDate >= domain.start && selectedDate <= domain.end ? 1 : 0)
+        .opacity(barCenter >= domain.start && barCenter <= domain.end ? 1 : 0)
     }
 }

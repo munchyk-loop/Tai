@@ -330,6 +330,23 @@ enum StatChartUtils {
         return calendar.date(from: components) ?? date
     }
 
+    /// The midpoint of the bar starting at `barStart`.
+    ///
+    /// A `BarMark` binned by hour or day occupies the whole interval and is drawn centred in
+    /// it, so a `RuleMark` placed at the bar's start date lands on its leading edge rather
+    /// than through its middle. Stepping a whole calendar unit keeps this correct across a
+    /// daylight-saving change, where a day is 23 or 25 hours long.
+    static func insulinBarCenter(
+        _ barStart: Date,
+        for selectedInterval: Stat.StateModel.StatsTimeInterval
+    ) -> Date {
+        let calendar = Calendar.current
+        let unit: Calendar.Component = selectedInterval == .day ? .hour : .day
+
+        guard let nextBar = calendar.date(byAdding: unit, value: 1, to: barStart) else { return barStart }
+        return barStart.addingTimeInterval(nextBar.timeIntervalSince(barStart) / 2)
+    }
+
     /// The scroll position the chart opens on: the start of the current period.
     static func insulinInitialScrollPosition(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Date {
         let calendar = Calendar.current
