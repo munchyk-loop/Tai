@@ -254,7 +254,7 @@ extension Stat {
             StatCard {
                 switch state.selectedInsulinChartType {
                 case .totalDailyDose:
-                    if state.dailyTDDStats.isEmpty {
+                    if (state.selectedIntervalForInsulinStats == .day ? state.hourlyTDDStats : state.dailyTDDStats).isEmpty {
                         ContentUnavailableView(
                             String(localized: "No TDD Data"),
                             systemImage: "chart.bar.xaxis",
@@ -264,8 +264,7 @@ extension Stat {
                         TotalDailyDoseChart(
                             selectedInterval: $state.selectedIntervalForInsulinStats,
                             tddStats: state.selectedIntervalForInsulinStats == .day ?
-                                state.hourlyTDDStats : state.dailyTDDStats,
-                            state: state
+                                state.hourlyTDDStats : state.dailyTDDStats
                         )
                     }
 

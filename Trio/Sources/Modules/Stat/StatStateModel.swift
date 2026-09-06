@@ -29,7 +29,6 @@ extension Stat {
         // Cache for TDD Stats
         var hourlyTDDStats: [TDDStats] = []
         var dailyTDDStats: [TDDStats] = []
-        var tddAveragesCache: [Date: Double] = [:]
 
         // Cache for Bolus Stats
         var hourlyBolusStats: [BolusStats] = []

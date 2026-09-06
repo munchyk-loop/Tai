@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1DDF0010000000000000001 /* TDDChartData.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1DDF0010000000000000002 /* TDDChartData.swift */; };
+		A1DDF0010000000000000003 /* TDDChartDataTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1DDF0010000000000000004 /* TDDChartDataTests.swift */; };
 		041D1E995A6AE92E9289DC49 /* TreatmentsDataFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D1A7CA8C10C4403D4BBFA7 /* TreatmentsDataFlow.swift */; };
 		0D9A5E34A899219C5C4CDFAF /* HistoryStateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9455FA2D92E77A6C4AFED8A3 /* HistoryStateModel.swift */; };
 		110AEDE32C5193D200615CC9 /* BolusIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110AEDE02C5193D100615CC9 /* BolusIntent.swift */; };
@@ -1169,6 +1171,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A1DDF0010000000000000002 /* TDDChartData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TDDChartData.swift; sourceTree = "<group>"; };
+		A1DDF0010000000000000004 /* TDDChartDataTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TDDChartDataTests.swift; sourceTree = "<group>"; };
 		07629711A990D7666480FF41 /* ProfileSchedulerProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProfileSchedulerProvider.swift; sourceTree = "<group>"; };
 		110AEDE02C5193D100615CC9 /* BolusIntent.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BolusIntent.swift; sourceTree = "<group>"; };
 		110AEDE12C5193D100615CC9 /* BolusIntentRequest.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BolusIntentRequest.swift; sourceTree = "<group>"; };
@@ -3314,6 +3318,7 @@
 				49AD0CF22F8797F4004301B6 /* AdaptiveUKFOrderingRegressionTest.swift */,
 				49AD0CF42F8797F5004301B6 /* ukf_python_reference.json */,
 				C2AA6D9B2E1AAC6300BF6C16 /* TDDStorageTimezoneTests.swift */,
+				A1DDF0010000000000000004 /* TDDChartDataTests.swift */,
 				DDDD0FFC2F4E22C000F9C645 /* GlucoseNativeConversionTests.swift */,
 				DDDD10A02F4E22C000F9C645 /* CarbsNativeConversionTests.swift */,
 				DDDD10B02F4E22C000F9C645 /* PumpHistoryNativeConversionTests.swift */,
@@ -4871,6 +4876,7 @@
 			isa = PBXGroup;
 			children = (
 				BD249D932D42FC5C00412DEB /* TotalDailyDoseChart.swift */,
+				A1DDF0010000000000000002 /* TDDChartData.swift */,
 				BD249D872D42FBFB00412DEB /* BolusStatsView.swift */,
 			);
 			path = Insulin;
@@ -5686,6 +5692,7 @@
 				389A572026079BAA00BC102F /* Interpolation.swift in Sources */,
 				DD9ECB702CA9A0BA00AA7C45 /* RemoteControlConfigStateModel.swift in Sources */,
 				BD249D942D42FC5E00412DEB /* TotalDailyDoseChart.swift in Sources */,
+				A1DDF0010000000000000001 /* TDDChartData.swift in Sources */,
 				BD249D902D42FC4500412DEB /* MealStatsView.swift in Sources */,
 				DD32CF9A2CC8247B003686D6 /* TrioRemoteControl+Meal.swift in Sources */,
 				BDF34F832C10C5B600D51995 /* DataManager.swift in Sources */,
@@ -6383,6 +6390,7 @@
 				BD8FC0592D66189700B95AED /* TestAssembly.swift in Sources */,
 				DDC6CA6D2DD90A2A0060EE25 /* LocalizationTests.swift in Sources */,
 				C2AA6D9C2E1AAC6300BF6C16 /* TDDStorageTimezoneTests.swift in Sources */,
+				A1DDF0010000000000000003 /* TDDChartDataTests.swift in Sources */,
 				3B997DCF2DC00A3A006B6BB2 /* JSONImporterTests.swift in Sources */,
 				3B2A3BC32E2B19F700658FB9 /* DynamicISFTests.swift in Sources */,
 				3BAE91A22F0001A100AE91A2 /* AutoISFAdjustTests.swift in Sources */,
