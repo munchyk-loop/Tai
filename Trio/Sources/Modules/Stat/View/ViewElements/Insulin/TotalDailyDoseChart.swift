@@ -3,8 +3,9 @@ import SwiftUI
 
 /// A view that displays a bar chart for Total Daily Dose (TDD) statistics.
 ///
-/// This view presents insulin usage over time. The chart pages one calendar period at a time
-/// when swiped, while a slow, precise drag can settle on a custom range.
+/// The chart pages one whole calendar period per swipe, while a slow, deliberate drag can
+/// still settle on a custom range. Header figures describe the settled window only, so they
+/// do not churn while a scroll is in flight.
 struct TotalDailyDoseChart: View {
     /// The selected time interval for displaying statistics.
     @Binding var selectedInterval: Stat.StateModel.StatsTimeInterval
@@ -13,16 +14,21 @@ struct TotalDailyDoseChart: View {
     /// The state model containing cached statistics data.
     let state: Stat.StateModel
 
-    /// The current scroll position in the chart.
+    /// The live scroll position. Continuous, and updated on every frame of a scroll.
     @State private var scrollPosition = Date()
+    /// The settled window start, rounded onto a whole bar. Everything in the header reads
+    /// from this rather than from `scrollPosition`.
+    @State private var committedStart = Date()
+    /// Debounce that holds header updates back until scrolling actually stops.
+    @State private var settleTask: Task<Void, Never>?
     /// The currently selected date in the chart.
     @State private var selectedDate: Date?
     /// The actual chart plot's width in pixel
     @State private var chartWidth: CGFloat = 0
 
-    /// The half-open range `[start, end)` currently on screen.
+    /// The half-open range `[start, end)` of the settled window.
     private var visibleDateRange: (start: Date, end: Date) {
-        StatChartUtils.insulinVisibleDateRange(from: scrollPosition, for: selectedInterval)
+        StatChartUtils.insulinVisibleDateRange(from: committedStart, for: selectedInterval)
     }
 
     /// The full extent the chart can be scrolled across.
@@ -31,21 +37,38 @@ struct TotalDailyDoseChart: View {
     }
 
     /// Retrieves the TDD statistic for a given date.
-    /// - Parameter date: The date for which to retrieve TDD data.
-    /// - Returns: The `TDDStats` object if available, otherwise `nil`.
     private func getTDDForDate(_ date: Date) -> TDDStats? {
         tddStats.first { stat in
             StatChartUtils.isSameTimeUnit(stat.date, date, for: selectedInterval)
         }
     }
 
+    /// Commits the settled window once scrolling has paused.
+    private func scheduleCommit(for rawPosition: Date) {
+        settleTask?.cancel()
+        settleTask = Task {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled else { return }
+            committedStart = StatChartUtils.insulinNormalizedStart(rawPosition, for: selectedInterval)
+        }
+    }
+
+    /// Jumps straight to the start of the current period, without waiting for the debounce.
+    private func resetToCurrentPeriod() {
+        settleTask?.cancel()
+        selectedDate = nil
+        let start = StatChartUtils.insulinInitialScrollPosition(for: selectedInterval)
+        scrollPosition = start
+        committedStart = start
+    }
+
     // MARK: - Header values
 
-    /// Every non-empty dose bucket inside the visible window.
+    /// Every non-empty dose bucket inside the settled window.
     ///
-    /// Buckets with no insulin are dropped so that empty hours and days never drag the
-    /// averages down. They contribute nothing to a sum either, so the same list backs
-    /// both the average and the total.
+    /// Buckets with no insulin are dropped so empty hours and days never drag the averages
+    /// down. They contribute nothing to a sum either, so one list backs the average and
+    /// the total alike.
     private var visibleDoses: [Double] {
         let range = visibleDateRange
         return tddStats
@@ -67,9 +90,8 @@ struct TotalDailyDoseChart: View {
 
     /// The insulin a typical calendar month in view would total at the current daily average.
     ///
-    /// Scaling the daily average keeps this consistent with the rule that empty days are
-    /// excluded, and keeps the number stable when the window is precision-scrolled so that
-    /// it only covers part of a month.
+    /// Scaling the daily average keeps this consistent with excluding empty days, and keeps
+    /// the figure stable when the window covers only part of a month.
     private var monthlyAverage: Double {
         let calendar = Calendar.current
         let range = visibleDateRange
@@ -92,26 +114,22 @@ struct TotalDailyDoseChart: View {
         return visibleAverage * averageMonthLength
     }
 
-    /// The label for the average shown in the header.
     private var averageTitle: String {
         selectedInterval == .day
             ? String(localized: "Hourly Average:")
             : String(localized: "Daily Average:")
     }
 
-    /// The label for the second header value.
     private var secondaryTitle: String {
         selectedInterval == .total
             ? String(localized: "Monthly Average:")
             : String(localized: "Total:")
     }
 
-    /// The second header value: a monthly average in the three-month view, a total elsewhere.
     private var secondaryValue: Double {
         selectedInterval == .total ? monthlyAverage : visibleTotal
     }
 
-    /// The caption above the chart.
     private var chartTitle: String {
         selectedInterval == .day
             ? String(localized: "Total Hourly Dose (U)")
@@ -138,16 +156,13 @@ struct TotalDailyDoseChart: View {
                     )
             }
         }
-        .onAppear {
-            scrollPosition = StatChartUtils.insulinInitialScrollPosition(for: selectedInterval)
-        }
-        .onChange(of: selectedInterval) {
-            selectedDate = nil
-            scrollPosition = StatChartUtils.insulinInitialScrollPosition(for: selectedInterval)
-        }
+        .onAppear { resetToCurrentPeriod() }
+        .onChange(of: selectedInterval) { resetToCurrentPeriod() }
+        .onChange(of: scrollPosition) { _, newValue in scheduleCommit(for: newValue) }
+        .onDisappear { settleTask?.cancel() }
     }
 
-    /// A view displaying the statistics summary for the visible range.
+    /// A view displaying the statistics summary for the settled window.
     private var statsView: some View {
         HStack(alignment: .top) {
             Grid(alignment: .leading) {
@@ -180,8 +195,8 @@ struct TotalDailyDoseChart: View {
 
     /// Whether a bar should be tinted to mark the start of a week.
     ///
-    /// Only Sundays are tinted, and only in the month and three-month views, where the
-    /// accent makes the week divisions easy to pick out.
+    /// Only Sundays, and only in the month and three-month views, where the accent makes
+    /// the week divisions easy to pick out.
     private func isWeekDivider(_ date: Date) -> Bool {
         guard selectedInterval == .month || selectedInterval == .total else { return false }
         return Calendar.current.component(.weekday, from: date) == 1
@@ -210,7 +225,6 @@ struct TotalDailyDoseChart: View {
                 )
             }
 
-            // Selection popover outside of the ForEach loop!
             if let selectedDate,
                let selectedTDD = getTDDForDate(selectedDate)
             {
@@ -266,8 +280,7 @@ struct TotalDailyDoseChart: View {
                             AxisGridLine()
                         }
                     case .total:
-                        // Show start of every month
-                        if day == 1 {
+                        if day == 1 { // Show start of every month
                             AxisValueLabel(format: StatChartUtils.dateFormat(for: selectedInterval), centered: true)
                                 .font(.footnote)
                             AxisGridLine()
@@ -280,25 +293,38 @@ struct TotalDailyDoseChart: View {
                 }
             }
         }
-        // An explicit domain means every reachable page lands on a calendar boundary, and
-        // removes the need for invisible padding marks to stretch the plotted range.
+        // An explicit domain keeps every reachable page on a calendar boundary, and removes
+        // the need for invisible padding marks to stretch the plotted range.
         .chartXScale(domain: scrollDomain)
         .chartScrollableAxes(.horizontal)
-        .chartXSelection(value: $selectedDate.animation(.easeInOut))
         .chartScrollPosition(x: $scrollPosition)
         .chartXVisibleDomain(length: StatChartUtils.insulinVisibleDomainLength(for: selectedInterval))
-        // `majorAlignment` is what Charts uses on a swipe: it jumps to the next or previous
-        // matching value, which gives the paging feel. `matching` is where a slow, precise drag
-        // settles, so a custom range such as Wed-Tue stays reachable. `.always` is essential --
-        // the default `.automatic` only limits scrolling on views that are compact along the
-        // scroll axis, so on a full-width chart a flick would otherwise fly past several periods.
         .chartScrollTargetBehavior(
-            .valueAligned(
-                matching: StatChartUtils.insulinMinorAlignment(for: selectedInterval),
-                majorAlignment: .matching(StatChartUtils.insulinMajorAlignment(for: selectedInterval)),
-                limitBehavior: .always
+            InsulinPagingScrollBehavior(
+                currentStart: StatChartUtils.insulinNormalizedStart(scrollPosition, for: selectedInterval),
+                interval: selectedInterval
             )
         )
+        // Selection is deliberately behind a long press. `chartXSelection` also reacts to a
+        // plain drag, which fights the scroll gesture: the popover kept firing when the user
+        // was only trying to scroll. Requiring a hold first leaves ordinary drags to the
+        // scroll view, and matches the "tap and hold a bar" hint under the chart.
+        .chartGesture { proxy in
+            LongPressGesture(minimumDuration: 0.2)
+                .sequenced(before: DragGesture(minimumDistance: 0))
+                .onChanged { phase in
+                    guard case let .second(_, drag?) = phase else { return }
+                    guard let date: Date = proxy.value(atX: drag.location.x) else { return }
+                    // Lock the popover onto the bar under the finger rather than tracking a
+                    // continuous position between bars.
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        selectedDate = StatChartUtils.insulinSnapToBar(date, for: selectedInterval)
+                    }
+                }
+                .onEnded { _ in
+                    withAnimation(.easeInOut) { selectedDate = nil }
+                }
+        }
         .frame(height: 250)
     }
 }
