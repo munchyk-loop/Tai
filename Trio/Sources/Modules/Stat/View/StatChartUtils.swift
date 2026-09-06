@@ -164,6 +164,190 @@ struct StatChartUtils {
         }
     }
 
+    // MARK: - Insulin (TDD) chart: calendar-aligned, page-like scrolling
+
+    /// The width of the insulin chart's visible window, in seconds.
+    ///
+    /// Each mode shows exactly one calendar period, so that a snapped window lines up with
+    /// real calendar boundaries: midnight-to-midnight, Sunday-to-Saturday, 31 days from the
+    /// 1st of a month, and three whole months.
+    static func insulinVisibleDomainLength(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> TimeInterval {
+        switch selectedInterval {
+        case .day: return 24 * 3600
+        case .week: return 7 * 24 * 3600
+        case .month: return 31 * 24 * 3600
+        case .total: return 92 * 24 * 3600
+        }
+    }
+
+    /// The components a slow, precise drag settles on.
+    ///
+    /// These are deliberately fine-grained so the user can park the chart on a custom range,
+    /// e.g. a Wednesday-to-Tuesday week, instead of always being forced onto a period boundary.
+    static func insulinMinorAlignment(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
+        switch selectedInterval {
+        case .day:
+            // Settle on whole hours.
+            return DateComponents(minute: 0, second: 0)
+        default:
+            // Settle on whole days.
+            return DateComponents(hour: 0, minute: 0, second: 0)
+        }
+    }
+
+    /// The components a *swipe* snaps to, i.e. one whole period per swipe.
+    ///
+    /// `Charts` uses this as the "major" alignment: a swipe jumps to the next or previous
+    /// matching value depending on direction, which is what produces page-like paging.
+    ///
+    /// - Important: minutes and seconds are pinned to zero. `DateComponents(day: 1)` on its own
+    ///   matches *any* time on the 1st of the month, which lets the chart settle at an arbitrary
+    ///   time of day and makes the window look like it never quite snapped.
+    static func insulinMajorAlignment(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
+        var components = DateComponents(hour: 0, minute: 0, second: 0)
+
+        switch selectedInterval {
+        case .day:
+            break // midnight, i.e. a whole day
+        case .week:
+            components.weekday = Calendar.current.firstWeekday // start of the week
+        case .month,
+             .total:
+            components.day = 1 // first of the month
+        }
+
+        return components
+    }
+
+    /// The number of whole days the insulin chart shows at once.
+    static func insulinVisibleDayCount(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Int {
+        switch selectedInterval {
+        case .day: return 1
+        case .week: return 7
+        case .month: return 31
+        case .total: return 92
+        }
+    }
+
+    /// The half-open date range `[start, end)` currently visible in the insulin chart.
+    ///
+    /// The end is advanced by whole calendar days rather than by a fixed number of seconds.
+    /// Across a daylight-saving change a day is 23 or 25 hours long, so a seconds-based window
+    /// drifts by an hour and can pull an extra day's bar into the totals.
+    static func insulinVisibleDateRange(
+        from scrollPosition: Date,
+        for selectedInterval: Stat.StateModel.StatsTimeInterval
+    ) -> (start: Date, end: Date) {
+        let calendar = Calendar.current
+        let dayCount = insulinVisibleDayCount(for: selectedInterval)
+        let end = calendar.date(byAdding: .day, value: dayCount, to: scrollPosition)
+            ?? scrollPosition.addingTimeInterval(insulinVisibleDomainLength(for: selectedInterval))
+        return (scrollPosition, end)
+    }
+
+    /// The start of the calendar period containing `date` for the given mode.
+    static func insulinPeriodStart(
+        containing date: Date,
+        for selectedInterval: Stat.StateModel.StatsTimeInterval
+    ) -> Date {
+        let calendar = Calendar.current
+
+        switch selectedInterval {
+        case .day:
+            return calendar.startOfDay(for: date)
+        case .week:
+            return calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)
+        case .month,
+             .total:
+            return calendar.dateInterval(of: .month, for: date)?.start ?? calendar.startOfDay(for: date)
+        }
+    }
+
+    /// The scroll position the insulin chart opens on: the start of the current period,
+    /// so the chart is snapped from the very first frame.
+    static func insulinInitialScrollPosition(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> Date {
+        let calendar = Calendar.current
+        let now = Date()
+        let periodStart = insulinPeriodStart(containing: now, for: selectedInterval)
+
+        guard selectedInterval == .total else { return periodStart }
+
+        // Three-month view: show the current month plus the two preceding ones.
+        return calendar.date(byAdding: .month, value: -2, to: periodStart) ?? periodStart
+    }
+
+    /// The full scrollable extent of the insulin chart.
+    ///
+    /// The lower bound is snapped back to a period boundary and the upper bound is the end of
+    /// the initial window, so every page the user can reach lands on a calendar boundary.
+    /// Defining the domain explicitly also removes the need for invisible padding marks.
+    static func insulinScrollDomain(
+        for selectedInterval: Stat.StateModel.StatsTimeInterval,
+        dates: [Date]
+    ) -> ClosedRange<Date> {
+        let upperBound = insulinInitialScrollPosition(for: selectedInterval)
+            .addingTimeInterval(insulinVisibleDomainLength(for: selectedInterval))
+
+        guard let earliest = dates.min() else {
+            return upperBound.addingTimeInterval(-insulinVisibleDomainLength(for: selectedInterval)) ... upperBound
+        }
+
+        let lowerBound = min(insulinPeriodStart(containing: earliest, for: selectedInterval), upperBound)
+        return lowerBound ... upperBound
+    }
+
+    /// Formats the header's date range for the insulin chart.
+    ///
+    /// When the window is snapped to a whole period the period's own name is shown (a weekday and
+    /// date for a day, a full month name for a month). Any other, precision-scrolled range falls
+    /// back to explicit start and end dates, e.g. "Feb 2 - Mar 4".
+    static func formatInsulinDateRange(
+        from start: Date,
+        to end: Date,
+        for selectedInterval: Stat.StateModel.StatsTimeInterval
+    ) -> String {
+        let calendar = Calendar.current
+        // `end` is exclusive; the last instant actually on screen belongs to the previous second.
+        let lastVisible = end.addingTimeInterval(-1)
+
+        let shortDate: (Date) -> String = { $0.formatted(.dateTime.month(.abbreviated).day()) }
+        let range = "\(shortDate(start)) - \(shortDate(lastVisible))"
+
+        let isMidnight = calendar.dateComponents([.hour, .minute, .second], from: start) == DateComponents(
+            hour: 0,
+            minute: 0,
+            second: 0
+        )
+
+        switch selectedInterval {
+        case .day:
+            guard isMidnight else { return range }
+            return start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+
+        case .week:
+            return range
+
+        case .month:
+            // Snapped to a whole month: show the month's name on its own, e.g. "February".
+            guard isMidnight, calendar.component(.day, from: start) == 1 else { return range }
+
+            let isCurrentYear = calendar.component(.year, from: start) == calendar.component(.year, from: Date())
+            return isCurrentYear
+                ? start.formatted(.dateTime.month(.wide))
+                : start.formatted(.dateTime.month(.wide).year())
+
+        case .total:
+            guard isMidnight, calendar.component(.day, from: start) == 1 else { return range }
+
+            // The window is a whole number of days, so it overscans a little way into a fourth
+            // month. Name the three months it is anchored to, the same way the month view is
+            // labelled "February" while a few days of March are still on screen.
+            let month: (Date) -> String = { $0.formatted(.dateTime.month(.abbreviated)) }
+            let lastMonth = calendar.date(byAdding: .month, value: 2, to: start) ?? lastVisible
+            return "\(month(start)) - \(month(lastMonth))"
+        }
+    }
+
     /// A helper function to create a `VStack` for each statistic.
     ///
     /// - Parameters:
