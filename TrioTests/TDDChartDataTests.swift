@@ -31,8 +31,10 @@ import Testing
         #expect(summary.average == 3)
     }
 
-    @Test("Daily averages exclude zero days and the following page", arguments: [TDDChartData.Interval.week, .month, .total])
-    func dailySummary(interval: TDDChartData.Interval) {
+    @Test(
+        "Daily averages exclude zero days and the following page",
+        arguments: [TDDChartData.Interval.week, .month, .total]
+    )  func dailySummary(interval: TDDChartData.Interval) {
         let c = calendar()
         let start = date(2026, 1, 1, calendar: c)
         let range = TDDChartData.visibleRange(from: start, for: interval, calendar: c)
@@ -126,18 +128,33 @@ import Testing
         )
     }
 
-    @Test("Three-month page crosses year boundaries using calendar months") func threeMonths() {
+    @Test("Three-month view contains the last 90 days through today, without month padding") func retainedHistory() {
         let c = calendar()
-        let initial = TDDChartData.initialPosition(for: .total, now: date(2026, 1, 15, calendar: c), calendar: c)
-        #expect(initial == date(2025, 11, 1, calendar: c))
-        #expect(TDDChartData.endDate(from: initial, for: .total, calendar: c) == date(2026, 2, 1, calendar: c))
+        let now = date(2026, 1, 15, 12, calendar: c)
+        let range = TDDChartData.recentRange(now: now, calendar: c)
+        #expect(range.lowerBound == date(2025, 10, 18, calendar: c))
+        #expect(range.upperBound == date(2026, 1, 16, calendar: c))
+        #expect(c.dateComponents([.day], from: range.lowerBound, to: range.upperBound).day == 90)
+        #expect(TDDChartData.initialPosition(for: .total, now: now, calendar: c) == range.lowerBound)
+        let domain = TDDChartData.scrollDomain(for: [], interval: .total, now: now, calendar: c)
+        #expect(domain.lowerBound == range.lowerBound)
+        #expect(domain.upperBound == range.upperBound)
+    }
+
+    @Test("Custom day ranges display hours without minutes") func wholeHourLabel() {
+        let c = calendar()
+        let range = TDDChartData.visibleRange(from: date(2026, 9, 1, 9, calendar: c), for: .day, calendar: c)
+        let label = TDDChartData.rangeLabel(for: range, interval: .day, calendar: c, locale: Locale(identifier: "en_US"))
+        #expect(!label.contains(":"))
+        #expect(label.contains("9"))
+        #expect(label.contains("Sep 1"))
+        #expect(label.contains("Sep 2"))
     }
 
     @Test(
         "Midnight boundaries survive DST and fractional time zones",
         arguments: ["America/New_York", "Europe/Berlin", "Asia/Kolkata", "Pacific/Kiritimati"]
-    )
-    func calendarBoundaries(zone: String) {
+    )  func calendarBoundaries(zone: String) {
         let c = calendar(zone)
         for (month, day) in [(3, 8), (3, 29), (11, 1)] {
             let start = date(2026, month, day, calendar: c)
@@ -185,7 +202,7 @@ import Testing
     @Test("Scale contains the entire current page even with sparse or no data") func scrollBounds() {
         let c = calendar()
         let now = date(2026, 9, 9, 12, calendar: c)
-        for interval in TDDChartData.Interval.allCases {
+        for interval in [TDDChartData.Interval.day, .week, .month] {
             for stats in [[], [TDDStats(date: now, amount: 2)]] {
                 let domain = TDDChartData.scrollDomain(for: stats, interval: interval, now: now, calendar: c)
                 let initial = TDDChartData.initialPosition(for: interval, now: now, calendar: c)

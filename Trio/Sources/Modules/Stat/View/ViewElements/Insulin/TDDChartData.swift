@@ -11,7 +11,7 @@ struct TDDStats: Identifiable, Equatable {
 enum TDDChartData {
     typealias Interval = Stat.StateModel.StatsTimeInterval
 
-    struct Summary {
+    struct Summary: Equatable {
         let average: Double
         let total: Double
         let monthlyAverage: Double
@@ -28,21 +28,29 @@ enum TDDChartData {
         case .month:
             return calendar.dateInterval(of: .month, for: today)!.start
         case .total:
-            let monthStart = calendar.dateInterval(of: .month, for: today)!.start
-            return calendar.date(byAdding: .month, value: -2, to: monthStart)!
+            return recentRange(now: now, calendar: calendar).lowerBound
         }
     }
 
     static func minorAlignment(for interval: Interval) -> DateComponents {
-        interval == .day ? DateComponents(minute: 0, second: 0) : DateComponents(hour: 0, minute: 0, second: 0)
+        interval == .day ? DateComponents(minute: 0) : DateComponents(hour: 0)
     }
 
     static func majorAlignment(for interval: Interval) -> DateComponents {
         switch interval {
-        case .day: return DateComponents(hour: 0, minute: 0, second: 0)
-        case .week: return DateComponents(hour: 0, minute: 0, second: 0, weekday: 1)
-        case .month, .total: return DateComponents(day: 1, hour: 0, minute: 0, second: 0)
+        case .day: return DateComponents(hour: 0)
+        case .week: return DateComponents(weekday: 1)
+        case .month,
+             .total: return DateComponents(day: 1)
         }
+    }
+
+    /// Match the retained daily history, including today, without padding to full months.
+    static func recentRange(now: Date = .now, calendar: Calendar = .current) -> Range<Date> {
+        let today = calendar.startOfDay(for: now)
+        let start = calendar.date(byAdding: .day, value: -89, to: today)!
+        let end = calendar.date(byAdding: .day, value: 1, to: today)!
+        return start ..< end
     }
 
     /// Snap summaries to the nearest bar boundary. Swift Charts can report a fractional
@@ -59,7 +67,7 @@ enum TDDChartData {
         case .day: return calendar.date(byAdding: .day, value: 1, to: start)!
         case .week: return calendar.date(byAdding: .day, value: 7, to: start)!
         case .month: return calendar.date(byAdding: .day, value: 31, to: start)!
-        case .total: return calendar.date(byAdding: .month, value: 3, to: start)!
+        case .total: return calendar.date(byAdding: .day, value: 90, to: start)!
         }
     }
 
@@ -68,9 +76,13 @@ enum TDDChartData {
     static func scrollDomain(
         for stats: [TDDStats], interval: Interval, now: Date = .now, calendar: Calendar = .current
     ) -> ClosedRange<Date> {
+        if interval == .total {
+            let range = recentRange(now: now, calendar: calendar)
+            return range.lowerBound ... range.upperBound
+        }
         let initial = initialPosition(for: interval, now: now, calendar: calendar)
         let first = min(stats.map(\.date).min() ?? initial, initial)
-        let lower = initialPosition(for: interval == .total ? .month : interval, now: first, calendar: calendar)
+        let lower = initialPosition(for: interval, now: first, calendar: calendar)
         let last = max(stats.map(\.date).max() ?? now, now)
         let latestPage = initialPosition(for: interval, now: last, calendar: calendar)
         return lower ... endDate(from: latestPage, for: interval, calendar: calendar)
@@ -114,7 +126,7 @@ enum TDDChartData {
             return formatted(start, .dateTime.weekday(.abbreviated).month(.abbreviated).day())
         }
         if interval == .day {
-            let style = Date.FormatStyle.dateTime.month(.abbreviated).day().hour().minute()
+            let style = Date.FormatStyle.dateTime.month(.abbreviated).day().hour()
             return formatted(start, style) + "–" + formatted(range.upperBound, style)
         }
         let style = calendar.component(.year, from: start) == calendar.component(.year, from: last)

@@ -1,4 +1,5 @@
 import Charts
+import Combine
 import SwiftUI
 
 /// Actual hourly or daily insulin totals, with native calendar-aligned scrolling.
@@ -6,23 +7,34 @@ struct TotalDailyDoseChart: View {
     @Binding var selectedInterval: Stat.StateModel.StatsTimeInterval
     let tddStats: [TDDStats]
 
-    @State private var scrollPosition: Date
+    // Live offsets are deliberately not published. Only a settled range updates the header.
+    @StateObject private var scrolling: TDDChartScrollPosition
+    @State private var displayedRange: Range<Date>
+    @State private var summary: TDDChartData.Summary
     @State private var selectedDate: Date?
+
+    private var calendar: Calendar {
+        var calendar = Calendar.current
+        calendar.firstWeekday = 1
+        return calendar
+    }
 
     init(selectedInterval: Binding<Stat.StateModel.StatsTimeInterval>, tddStats: [TDDStats]) {
         _selectedInterval = selectedInterval
         self.tddStats = tddStats
-        _scrollPosition = State(initialValue: TDDChartData.initialPosition(for: selectedInterval.wrappedValue))
-    }
-
-    private var visibleRange: Range<Date> {
-        TDDChartData.visibleRange(from: scrollPosition, for: selectedInterval)
+        let interval = selectedInterval.wrappedValue
+        let initial = TDDChartData.initialPosition(for: interval)
+        let range = interval == .total ? TDDChartData.recentRange() : TDDChartData.visibleRange(from: initial, for: interval)
+        _scrolling = StateObject(wrappedValue: TDDChartScrollPosition(position: initial))
+        _displayedRange = State(initialValue: range)
+        _summary = State(initialValue: TDDChartData.summary(of: tddStats, in: range))
     }
 
     private var selectedTDD: TDDStats? {
         guard let selectedDate else { return nil }
         return tddStats.first {
-            StatChartUtils.isSameTimeUnit($0.date, selectedDate, for: selectedInterval) && visibleRange.contains($0.date)
+            calendar.isDate($0.date, equalTo: selectedDate, toGranularity: selectedInterval == .day ? .hour : .day)
+                && displayedRange.contains($0.date)
         }
     }
 
@@ -37,18 +49,26 @@ struct TotalDailyDoseChart: View {
                     .padding(.bottom, 4)
 
                 chartsView
+                    // Reserve annotation space so selection never moves the plot or covers its bars.
+                    .padding(.top, selectedInterval == .day ? 80 : 60)
             }
         }
+        .environment(\.calendar, calendar)
+        .environment(\.timeZone, calendar.timeZone)
         .onChange(of: selectedInterval) {
             selectedDate = nil
-            scrollPosition = TDDChartData.initialPosition(for: selectedInterval)
+            scrolling.isScrolling = false
+            scrolling.position = TDDChartData.initialPosition(for: selectedInterval, calendar: calendar)
+            updateSummary()
+        }
+        .onChange(of: tddStats) {
+            if !scrolling.isScrolling { updateSummary() }
         }
     }
 
     private var statsView: some View {
-        let summary = TDDChartData.summary(of: tddStats, in: visibleRange)
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(TDDChartData.rangeLabel(for: visibleRange, interval: selectedInterval))
+        VStack(alignment: .leading, spacing: 8) {
+            Text(TDDChartData.rangeLabel(for: displayedRange, interval: selectedInterval, calendar: calendar))
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -71,15 +91,75 @@ struct TotalDailyDoseChart: View {
             .monospacedDigit()
     }
 
-    private var chartsView: some View {
-        Chart {
-            ForEach(tddStats) { stat in
+    private func updateSummary() {
+        let range = selectedInterval == .total
+            ? TDDChartData.recentRange(calendar: calendar)
+            : TDDChartData.visibleRange(from: scrolling.position, for: selectedInterval, calendar: calendar)
+        displayedRange = range
+        summary = TDDChartData.summary(of: tddStats, in: range, calendar: calendar)
+    }
+
+    @ViewBuilder private var chartsView: some View {
+        if selectedInterval == .total {
+            // This is the complete retained history, not a window into a scrollable chart.
+            chart
+        } else if #available(iOS 18.0, *) {
+            scrollableChart.onScrollPhaseChange { _, phase in
+                scrolling.isScrolling = phase != .idle
+                if phase == .idle {
+                    // Read the final binding value after Swift Charts finishes the scroll update.
+                    DispatchQueue.main.async {
+                        if !scrolling.isScrolling { updateSummary() }
+                    }
+                }
+            }
+        } else {
+            scrollableChart
+        }
+    }
+
+    private var scrollableChart: some View {
+        chart
+            .chartScrollableAxes(.horizontal)
+            .chartScrollPosition(x: Binding(
+                get: { scrolling.position },
+                set: {
+                    if selectedDate != nil { selectedDate = nil }
+                    scrolling.move(to: $0)
+                }
+            ))
+            .chartScrollTargetBehavior(
+                .valueAligned(
+                    matching: TDDChartData.minorAlignment(for: selectedInterval),
+                    majorAlignment: selectedInterval == .month
+                        ? .matching(TDDChartData.majorAlignment(for: selectedInterval)) : .page,
+                    limitBehavior: .always
+                )
+            )
+            // Keep the scale length stable throughout dragging and deceleration.
+            .chartXVisibleDomain(length: displayedRange.upperBound.timeIntervalSince(displayedRange.lowerBound))
+            .onReceive(scrolling.positions.debounce(for: .milliseconds(250), scheduler: RunLoop.main)) { _ in
+                // iOS 17 lacks scroll phases. This also covers programmatic changes with no phase event.
+                if #available(iOS 18.0, *) {
+                    guard !scrolling.isScrolling else { return }
+                }
+                scrolling.isScrolling = false
+                updateSummary()
+            }
+    }
+
+    private var chart: some View {
+        let selectedTDD = selectedTDD
+        let bars = selectedInterval == .total ? tddStats.filter { displayedRange.contains($0.date) } : tddStats
+        return Chart {
+            ForEach(bars) { stat in
                 BarMark(
                     x: .value("Date", stat.date, unit: selectedInterval == .day ? .hour : .day),
                     y: .value("Amount", stat.amount)
                 )
                 .foregroundStyle(
-                    TDDChartData.highlightsSunday(stat.date, for: selectedInterval) ? Color.basal : Color.insulin
+                    TDDChartData.highlightsSunday(stat.date, for: selectedInterval, calendar: calendar) ? Color.basal : Color
+                        .insulin
                 )
                 .annotation(position: .top) {
                     if selectedInterval == .week {
@@ -94,10 +174,11 @@ struct TotalDailyDoseChart: View {
             if let selectedTDD {
                 RuleMark(x: .value("Selected Date", selectedTDD.date, unit: selectedInterval == .day ? .hour : .day))
                     .foregroundStyle(Color.insulin.opacity(0.5))
+                    .zIndex(-1)
                     .annotation(
                         position: .top,
                         spacing: 0,
-                        overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
+                        overflowResolution: .init(x: .fit(to: .chart), y: .disabled)
                     ) {
                         TDDSelectionPopover(tdd: selectedTDD, selectedInterval: selectedInterval)
                     }
@@ -117,7 +198,6 @@ struct TotalDailyDoseChart: View {
         .chartXAxis {
             AxisMarks(preset: .aligned, values: .stride(by: selectedInterval == .day ? .hour : .day)) { value in
                 if let date = value.as(Date.self) {
-                    let calendar = Calendar.current
                     let day = calendar.component(.day, from: date)
                     let hour = calendar.component(.hour, from: date)
                     let showLabel = switch selectedInterval {
@@ -138,17 +218,7 @@ struct TotalDailyDoseChart: View {
             domain: TDDChartData.scrollDomain(for: tddStats, interval: selectedInterval),
             range: .plotDimension(padding: 0)
         )
-        .chartScrollableAxes(.horizontal)
         .chartXSelection(value: $selectedDate)
-        .chartScrollPosition(x: $scrollPosition)
-        .chartScrollTargetBehavior(
-            .valueAligned(
-                matching: TDDChartData.minorAlignment(for: selectedInterval),
-                majorAlignment: .matching(TDDChartData.majorAlignment(for: selectedInterval)),
-                limitBehavior: .always
-            )
-        )
-        .chartXVisibleDomain(length: visibleRange.upperBound.timeIntervalSince(visibleRange.lowerBound))
         .frame(height: 250)
     }
 }
@@ -161,7 +231,7 @@ private struct TDDSelectionPopover: View {
         let dateText = tdd.date.formatted(.dateTime.month().day().weekday())
         guard selectedInterval == .day else { return dateText }
         let end = Calendar.current.date(byAdding: .hour, value: 1, to: tdd.date)!
-        return dateText + "\n" + tdd.date.formatted(.dateTime.hour().minute()) + "–" + end.formatted(.dateTime.hour().minute())
+        return dateText + "\n" + tdd.date.formatted(.dateTime.hour()) + "–" + end.formatted(.dateTime.hour())
     }
 
     var body: some View {
@@ -170,11 +240,32 @@ private struct TDDSelectionPopover: View {
                 .font(.subheadline)
                 .bold()
                 .foregroundStyle(.secondary)
-            Divider()
             Text(tdd.amount.formatted(.number.precision(.fractionLength(1))) + "\u{00A0}U")
                 .font(.headline)
         }
-        .padding()
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .fixedSize()
+        .foregroundStyle(.primary)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// Swift Charts owns gestures, targets and deceleration. This stores its reported position
+/// without publishing every frame to the chart and header.
+private final class TDDChartScrollPosition: ObservableObject {
+    var position: Date
+    var isScrolling = false
+    let positions = PassthroughSubject<Date, Never>()
+
+    init(position: Date) {
+        self.position = position
+    }
+
+    func move(to position: Date) {
+        guard self.position != position else { return }
+        self.position = position
+        if #unavailable(iOS 18.0) { isScrolling = true }
+        positions.send(position)
     }
 }
