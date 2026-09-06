@@ -2,63 +2,6 @@ import Charts
 import Foundation
 import SwiftUI
 
-/// A scroll behaviour for the insulin chart that pages by whole calendar periods.
-///
-/// `.valueAligned` projects the scroll's momentum and then snaps wherever that projection
-/// lands, so a firm swipe can coast across several periods and settle on an arbitrary day.
-/// That is momentum scrolling with alignment, not paging.
-///
-/// This behaviour separates the two gestures the chart needs:
-///
-/// * A **flick** moves exactly one period from the page currently on screen, regardless of
-///   how hard it was thrown. One swipe, one day/week/month.
-/// * A **slow drag** keeps the projected destination and merely rounds it onto a whole bar,
-///   so a custom range such as Wednesday-to-Tuesday stays reachable.
-///
-/// Direction is taken from the projected destination rather than the sign of `velocity`,
-/// which keeps it correct regardless of the scroll view's coordinate conventions.
-struct InsulinPagingScrollBehavior: ChartScrollTargetBehavior {
-    /// The period boundary the chart is currently anchored to.
-    let currentStart: Date
-    /// The mode being displayed.
-    let interval: Stat.StateModel.StatsTimeInterval
-
-    /// Point-per-second speed above which a gesture counts as a flick rather than a drag.
-    private let flickVelocityThreshold: CGFloat = 250
-
-    func updateTarget(_ target: inout ScrollTarget, context: ChartScrollTargetBehaviorContext) {
-        let proxy = context.chartProxy
-
-        // Where the scroll view's own momentum would have put us.
-        guard let projected: Date = proxy.value(atX: target.rect.origin.x) else { return }
-
-        let destination: Date
-
-        if abs(context.velocity.dx) > flickVelocityThreshold {
-            // A flick. Move to the adjacent period boundary, ignoring how far the momentum
-            // would have carried the chart.
-            let anchor = StatChartUtils.insulinPeriodStart(containing: currentStart, for: interval)
-
-            if projected > currentStart {
-                // Forwards is always the next boundary after the current position.
-                destination = StatChartUtils.insulinPage(from: anchor, steps: 1, for: interval)
-            } else if anchor == currentStart {
-                // Already snapped, so step back a whole period.
-                destination = StatChartUtils.insulinPage(from: anchor, steps: -1, for: interval)
-            } else {
-                // Mid-period after a precision scroll: fall back onto the boundary behind us.
-                destination = anchor
-            }
-        } else {
-            // A deliberate drag. Respect where the user let go, rounded to a whole bar.
-            destination = StatChartUtils.insulinSnapToBar(projected, for: interval)
-        }
-
-        guard let x = proxy.position(forX: destination) else { return }
-        target.rect.origin.x = x
-    }
-}
-
 enum StatChartUtils {
     /// Returns the time interval length for the visible domain based on the selected duration.
     /// - Parameter selectedInterval: The selected time interval for statistics.
@@ -238,6 +181,41 @@ enum StatChartUtils {
         }
     }
 
+    /// The components a slow, precise drag settles on.
+    ///
+    /// Fine-grained on purpose, so the chart can be parked on a custom range such as a
+    /// Wednesday-to-Tuesday week instead of always being forced onto a period boundary.
+    static func insulinMinorAlignment(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
+        switch selectedInterval {
+        case .day:
+            return DateComponents(minute: 0, second: 0) // whole hours
+        default:
+            return DateComponents(hour: 0, minute: 0, second: 0) // whole days
+        }
+    }
+
+    /// The components a swipe snaps to: one whole period.
+    ///
+    /// - Important: minutes and seconds are pinned to zero. `DateComponents(day: 1)` on its
+    ///   own matches *any* instant on the 1st of the month, and `DateComponents(weekday: 1)`
+    ///   matches any instant on a Sunday, so without pinning the time the chart settles at an
+    ///   arbitrary hour and the window never looks snapped.
+    static func insulinMajorAlignment(for selectedInterval: Stat.StateModel.StatsTimeInterval) -> DateComponents {
+        var components = DateComponents(hour: 0, minute: 0, second: 0)
+
+        switch selectedInterval {
+        case .day:
+            break // midnight, i.e. a whole day
+        case .week:
+            components.weekday = Calendar.current.firstWeekday
+        case .month,
+             .total:
+            components.day = 1
+        }
+
+        return components
+    }
+
     /// Rounds a raw scroll position onto a whole bar boundary.
     ///
     /// `chartScrollPosition` reports a continuous value, so even a perfectly settled chart
@@ -292,28 +270,6 @@ enum StatChartUtils {
         case .month,
              .total:
             return calendar.dateInterval(of: .month, for: date)?.start ?? calendar.startOfDay(for: date)
-        }
-    }
-
-    /// Moves `steps` whole periods from a period boundary.
-    ///
-    /// Calendar arithmetic, so a month step lands on the 1st of the next month rather than
-    /// 31 days later, and a week step lands on the same weekday.
-    static func insulinPage(
-        from periodStart: Date,
-        steps: Int,
-        for selectedInterval: Stat.StateModel.StatsTimeInterval
-    ) -> Date {
-        let calendar = Calendar.current
-
-        switch selectedInterval {
-        case .day:
-            return calendar.date(byAdding: .day, value: steps, to: periodStart) ?? periodStart
-        case .week:
-            return calendar.date(byAdding: .weekOfYear, value: steps, to: periodStart) ?? periodStart
-        case .month,
-             .total:
-            return calendar.date(byAdding: .month, value: steps, to: periodStart) ?? periodStart
         }
     }
 

@@ -317,10 +317,20 @@ struct TotalDailyDoseChart: View {
         // stationary press showed no popover at all.
         .chartXSelection(value: $rawSelection.animation(.easeInOut))
         .chartXVisibleDomain(length: StatChartUtils.insulinVisibleDomainLength(for: selectedInterval))
+        // Charts' own value-aligned behaviour. A hand-rolled ChartScrollTargetBehavior was
+        // tried here and mixed up two coordinate spaces: ScrollTarget.rect is a scroll-content
+        // offset, while ChartProxy.value(atX:)/position(forX:) work in plot-area coordinates.
+        // Feeding one to the other produced nonsense targets, so the chart was yanked back on
+        // every gesture and barely scrolled at all.
+        //
+        // `matching` is where a slow drag settles, `majorAlignment` is where a swipe lands,
+        // and `.always` forces the per-gesture limit that `.automatic` applies only to views
+        // that are compact along the scroll axis.
         .chartScrollTargetBehavior(
-            InsulinPagingScrollBehavior(
-                currentStart: StatChartUtils.insulinNormalizedStart(scrollPosition, for: selectedInterval),
-                interval: selectedInterval
+            .valueAligned(
+                matching: StatChartUtils.insulinMinorAlignment(for: selectedInterval),
+                majorAlignment: .matching(StatChartUtils.insulinMajorAlignment(for: selectedInterval)),
+                limitBehavior: .always
             )
         )
         .frame(height: 250)
