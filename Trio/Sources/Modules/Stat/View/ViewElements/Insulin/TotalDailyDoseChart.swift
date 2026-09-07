@@ -79,7 +79,20 @@ struct TotalDailyDoseChart: View {
         settleTask = Task {
             try? await Task.sleep(nanoseconds: 200_000_000)
             guard !Task.isCancelled else { return }
-            committedStart = StatChartUtils.insulinNormalizedStart(rawPosition, for: selectedInterval)
+            let snapped = StatChartUtils.insulinNormalizedStart(rawPosition, for: selectedInterval)
+            committedStart = snapped
+
+            // A drag released while the finger is stationary never enters a deceleration
+            // phase, and a scroll-target behaviour's target is only applied during one, so the
+            // chart can come to rest part-way through a bar. Once motion has stopped, write
+            // the snapped position back through the binding so the window always sits on a
+            // bar boundary. Skipped for larger residuals, which mean an animation is still
+            // in flight rather than a stationary rest.
+            let residual = abs(rawPosition.timeIntervalSince(snapped))
+            let barLength: TimeInterval = selectedInterval == .day ? 3600 : 86400
+            if residual > 1, residual < barLength / 2 {
+                scrollPosition = snapped
+            }
         }
     }
 
