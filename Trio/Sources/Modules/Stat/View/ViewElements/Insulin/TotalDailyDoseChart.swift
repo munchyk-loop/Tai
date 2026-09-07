@@ -14,11 +14,17 @@ struct TotalDailyDoseChart: View {
     /// The state model containing cached statistics data.
     let state: Stat.StateModel
 
+    /// Where the chart should sit when it first appears.
+    @State private var openingAnchor: Date
     /// The live scroll position. Continuous, and updated on every frame of a scroll.
-    @State private var scrollPosition = Date()
+    ///
+    /// Note that Charts does not report the opening position through this binding: it stays
+    /// at whatever it was initialised to until the user actually scrolls. Seeding it, and
+    /// nudging the chart once it has laid out, is what keeps the header and the bars in step.
+    @State private var scrollPosition: Date
     /// The settled window start, rounded onto a whole bar. Everything in the header reads
     /// from this rather than from `scrollPosition`.
-    @State private var committedStart = Date()
+    @State private var committedStart: Date
     /// Debounce that holds header updates back until scrolling actually stops.
     @State private var settleTask: Task<Void, Never>?
     /// The raw selection reported by the chart, anywhere along the x axis.
@@ -34,6 +40,21 @@ struct TotalDailyDoseChart: View {
 
     /// The actual chart plot's width in pixel
     @State private var chartWidth: CGFloat = 0
+
+    init(
+        selectedInterval: Binding<Stat.StateModel.StatsTimeInterval>,
+        tddStats: [TDDStats],
+        state: Stat.StateModel
+    ) {
+        _selectedInterval = selectedInterval
+        self.tddStats = tddStats
+        self.state = state
+
+        let anchor = StatChartUtils.insulinInitialScrollPosition(for: selectedInterval.wrappedValue)
+        _openingAnchor = State(initialValue: anchor)
+        _scrollPosition = State(initialValue: anchor)
+        _committedStart = State(initialValue: anchor)
+    }
 
     /// The half-open range `[start, end)` of the settled window.
     private var visibleDateRange: (start: Date, end: Date) {
@@ -62,13 +83,14 @@ struct TotalDailyDoseChart: View {
         }
     }
 
-    /// Jumps straight to the start of the current period, without waiting for the debounce.
-    private func resetToCurrentPeriod() {
+    /// Moves the chart to the start of the current period for the newly selected mode.
+    private func jumpToCurrentPeriod() {
         settleTask?.cancel()
         rawSelection = nil
-        let start = StatChartUtils.insulinInitialScrollPosition(for: selectedInterval)
-        scrollPosition = start
-        committedStart = start
+        let anchor = StatChartUtils.insulinInitialScrollPosition(for: selectedInterval)
+        openingAnchor = anchor
+        scrollPosition = anchor
+        committedStart = anchor
     }
 
     // MARK: - Header values
@@ -165,8 +187,18 @@ struct TotalDailyDoseChart: View {
                     )
             }
         }
-        .onAppear { resetToCurrentPeriod() }
-        .onChange(of: selectedInterval) { resetToCurrentPeriod() }
+        .task {
+            // Move the chart onto the current period once it has laid out. Assigning the
+            // binding synchronously from onAppear is too early and gets ignored, which left
+            // the header describing one window while the chart drew another.
+            // `chartScrollPosition(initialX:)` is not an option here: applied alongside the
+            // `x` binding it is re-applied on every re-render and pins the chart, so it stops
+            // scrolling altogether.
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            scrollPosition = openingAnchor
+            committedStart = openingAnchor
+        }
+        .onChange(of: selectedInterval) { jumpToCurrentPeriod() }
         .onChange(of: scrollPosition) { _, newValue in scheduleCommit(for: newValue) }
         .onDisappear { settleTask?.cancel() }
     }
@@ -307,6 +339,11 @@ struct TotalDailyDoseChart: View {
         // the need for invisible padding marks to stretch the plotted range.
         .chartXScale(domain: scrollDomain)
         .chartScrollableAxes(.horizontal)
+        // The chart owns its scroll position and reports it through this binding. Do not also
+        // apply `chartScrollPosition(initialX:)`: combining the two pins the chart, and it
+        // stops scrolling entirely. Do not assign this binding on appear either -- that
+        // overwrites the position the chart just reported, leaving the header describing one
+        // window while the chart draws another.
         .chartScrollPosition(x: $scrollPosition)
         // Charts' own selection, which the chart coordinates with its own scroll handling.
         //
