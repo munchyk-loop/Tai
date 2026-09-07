@@ -186,6 +186,19 @@ struct TotalDailyDoseChart: View {
                         }
                     )
             }
+
+            // TEMPORARY: gesture speeds, for choosing the flick threshold on real hardware.
+            // Remove together with `InsulinScrollDebug` once the value is settled.
+            VStack(alignment: .leading, spacing: 1) {
+                Text("GESTURE SPEEDS (newest first)")
+                ForEach(Array(InsulinScrollDebug.samples.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                }
+            }
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(.yellow)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 6)
         }
         .task {
             // Move the chart onto the current period once it has laid out. Assigning the

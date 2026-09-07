@@ -1,3 +1,22 @@
+/// TEMPORARY instrumentation for calibrating the insulin chart's flick threshold.
+///
+/// The simulator cannot generate scroll velocity (both `swipe` and `touch_path` report zero),
+/// so the threshold cannot be measured off-device. This records the speed of the last few
+/// gestures so it can be read off a real device and the threshold set from data.
+///
+/// Remove this type, its call in `InsulinPagingScrollBehavior`, and the overlay in
+/// `TotalDailyDoseChart` once the value is chosen.
+enum InsulinScrollDebug {
+    nonisolated(unsafe) static var samples: [String] = []
+
+    static func record(velocity: CGFloat, threshold: CGFloat) {
+        let speed = abs(velocity)
+        let line = String(format: "%5.0f pt/s  %@", speed, speed < threshold ? "drag" : "FLICK")
+        samples.insert(line, at: 0)
+        if samples.count > 5 { samples.removeLast() }
+    }
+}
+
 import Charts
 import Foundation
 import SwiftUI
@@ -53,13 +72,16 @@ struct InsulinPagingScrollBehavior: ChartScrollTargetBehavior {
         }
 
         let speed = abs(context.velocity.dx)
+        InsulinScrollDebug.record(velocity: context.velocity.dx, threshold: flickThreshold)
         let destination: Date
 
         if speed < flickThreshold {
-            // A drag. Settle on the bar under the finger. Derived from the target rather than
-            // from `releaseStart` so the common case depends only on values Charts hands us;
-            // at this speed the momentum built into the target is negligible.
-            destination = StatChartUtils.insulinSnapToBar(date(atOffset: target.rect.origin.x), for: interval)
+            // A drag. Settle on the bar the window was actually on when the finger lifted.
+            //
+            // Deliberately NOT derived from `target.rect`: that is the scroll view's
+            // momentum-projected landing point, and even a slow drag carries enough
+            // projection to throw the window well past where the user let go.
+            destination = StatChartUtils.insulinSnapToBar(releaseStart, for: interval)
         } else {
             // A flick. Move whole periods from the page the gesture started on, discarding
             // however far the momentum would have carried the chart.
