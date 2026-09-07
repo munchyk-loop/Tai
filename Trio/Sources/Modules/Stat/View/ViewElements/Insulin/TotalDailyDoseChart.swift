@@ -3,8 +3,9 @@ import SwiftUI
 
 /// A view that displays a bar chart for Total Daily Dose (TDD) statistics.
 ///
-/// This view presents insulin usage over time, with the ability to adjust the time interval
-/// and scroll through historical data.
+/// The chart pages one whole calendar period per swipe, while a slow, deliberate drag can
+/// still settle on a custom range. Header figures describe the settled window only, so they
+/// do not churn while a scroll is in flight.
 struct TotalDailyDoseChart: View {
     /// The selected time interval for displaying statistics.
     @Binding var selectedInterval: Stat.StateModel.StatsTimeInterval
@@ -13,58 +14,170 @@ struct TotalDailyDoseChart: View {
     /// The state model containing cached statistics data.
     let state: Stat.StateModel
 
-    /// The current scroll position in the chart.
-    @State private var scrollPosition = Date()
-    /// The currently selected date in the chart.
-    @State private var selectedDate: Date?
-    /// The calculated average TDD for the visible range.
-    @State private var currentAverage: Double = 0
-    /// Timer to throttle updates when scrolling.
-    @State private var updateTimer = Stat.UpdateTimer()
-    /// Sum of hourly doses for `Day` view
-    @State private var sumOfHourlyDoses: Double = 0
+    /// Where the chart should sit when it first appears.
+    @State private var openingAnchor: Date
+    /// The live scroll position. Continuous, and updated on every frame of a scroll.
+    ///
+    /// Note that Charts does not report the opening position through this binding: it stays
+    /// at whatever it was initialised to until the user actually scrolls. Seeding it, and
+    /// nudging the chart once it has laid out, is what keeps the header and the bars in step.
+    @State private var scrollPosition: Date
+    /// The settled window start, rounded onto a whole bar. Everything in the header reads
+    /// from this rather than from `scrollPosition`.
+    @State private var committedStart: Date
+    /// Debounce that holds header updates back until scrolling actually stops.
+    @State private var settleTask: Task<Void, Never>?
+    /// The raw selection reported by the chart, anywhere along the x axis.
+    @State private var rawSelection: Date?
+
+    /// The start of the bar the selection falls in, or nil when nothing is selected.
+    ///
+    /// The chart reports a continuous position, so this rounds onto the containing bar and
+    /// keeps the popover locked to a single bar instead of drifting between two.
+    private var selectedBarStart: Date? {
+        rawSelection.map { StatChartUtils.insulinSnapToBar($0, for: selectedInterval) }
+    }
+
     /// The actual chart plot's width in pixel
     @State private var chartWidth: CGFloat = 0
 
-    /// Computes the visible date range based on the current scroll position.
+    init(
+        selectedInterval: Binding<Stat.StateModel.StatsTimeInterval>,
+        tddStats: [TDDStats],
+        state: Stat.StateModel
+    ) {
+        _selectedInterval = selectedInterval
+        self.tddStats = tddStats
+        self.state = state
+
+        let anchor = StatChartUtils.insulinInitialScrollPosition(for: selectedInterval.wrappedValue)
+        _openingAnchor = State(initialValue: anchor)
+        _scrollPosition = State(initialValue: anchor)
+        _committedStart = State(initialValue: anchor)
+    }
+
+    /// The half-open range `[start, end)` of the settled window.
     private var visibleDateRange: (start: Date, end: Date) {
-        StatChartUtils.visibleDateRange(from: scrollPosition, for: selectedInterval)
+        StatChartUtils.insulinVisibleDateRange(from: committedStart, for: selectedInterval)
+    }
+
+    /// The full extent the chart can be scrolled across.
+    private var scrollDomain: ClosedRange<Date> {
+        StatChartUtils.insulinScrollDomain(for: selectedInterval, dates: tddStats.map(\.date))
     }
 
     /// Retrieves the TDD statistic for a given date.
-    /// - Parameter date: The date for which to retrieve TDD data.
-    /// - Returns: The `TDDStats` object if available, otherwise `nil`.
     private func getTDDForDate(_ date: Date) -> TDDStats? {
         tddStats.first { stat in
             StatChartUtils.isSameTimeUnit(stat.date, date, for: selectedInterval)
         }
     }
 
-    /// Updates the average TDD value based on the visible date range.
-    private func updateAverages() {
-        currentAverage = state.getCachedTDDAverages(for: visibleDateRange)
-    }
+    /// Commits the settled window once scrolling has paused.
+    private func scheduleCommit(for rawPosition: Date) {
+        settleTask?.cancel()
+        settleTask = Task {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled else { return }
+            let snapped = StatChartUtils.insulinNormalizedStart(rawPosition, for: selectedInterval)
+            committedStart = snapped
 
-    /// Updates the total of hourly doses for `Day` view
-    private func updateTotalDoses() {
-        sumOfHourlyDoses = tddStats.filter({ $0.date >= visibleDateRange.start && $0.date <= visibleDateRange.end })
-            .reduce(0, { result, stat in
-                result + stat.amount
-            })
-    }
-
-    /// Defines empty scroll area to the right side of chart
-    private func daysToAdd(for interval: Stat.StateModel.StatsTimeInterval) -> Int {
-        switch interval {
-        case .day:
-            return 1 /// scroll to end of day
-        case .week:
-            return 5 /// leave room for current averages down to 3 days
-        case .month:
-            return 17 /// for 2 week average
-        default:
-            return 1
+            // A drag released while the finger is stationary never enters a deceleration
+            // phase, and a scroll-target behaviour's target is only applied during one, so the
+            // chart can come to rest part-way through a bar. Once motion has stopped, write
+            // the snapped position back through the binding so the window always sits on a
+            // bar boundary. Skipped for larger residuals, which mean an animation is still
+            // in flight rather than a stationary rest.
+            let residual = abs(rawPosition.timeIntervalSince(snapped))
+            let barLength: TimeInterval = selectedInterval == .day ? 3600 : 86400
+            if residual > 1, residual < barLength / 2 {
+                scrollPosition = snapped
+            }
         }
+    }
+
+    /// Moves the chart to the start of the current period for the newly selected mode.
+    private func jumpToCurrentPeriod() {
+        settleTask?.cancel()
+        rawSelection = nil
+        let anchor = StatChartUtils.insulinInitialScrollPosition(for: selectedInterval)
+        openingAnchor = anchor
+        scrollPosition = anchor
+        committedStart = anchor
+    }
+
+    // MARK: - Header values
+
+    /// Every non-empty dose bucket inside the settled window.
+    ///
+    /// Buckets with no insulin are dropped so empty hours and days never drag the averages
+    /// down. They contribute nothing to a sum either, so one list backs the average and
+    /// the total alike.
+    private var visibleDoses: [Double] {
+        let range = visibleDateRange
+        return tddStats
+            .filter { $0.date >= range.start && $0.date < range.end }
+            .map(\.amount)
+            .filter { $0 > 0 }
+    }
+
+    /// The total insulin across every bar in view.
+    private var visibleTotal: Double {
+        visibleDoses.reduce(0, +)
+    }
+
+    /// The average dose per non-empty bar: hourly in `Day` mode, daily everywhere else.
+    private var visibleAverage: Double {
+        guard !visibleDoses.isEmpty else { return 0 }
+        return visibleTotal / Double(visibleDoses.count)
+    }
+
+    /// The insulin a typical calendar month in view would total at the current daily average.
+    ///
+    /// Scaling the daily average keeps this consistent with excluding empty days, and keeps
+    /// the figure stable when the window covers only part of a month.
+    private var monthlyAverage: Double {
+        let calendar = Calendar.current
+        let range = visibleDateRange
+
+        var monthLengths: [Int] = []
+        var cursor = calendar.dateInterval(of: .month, for: range.start)?.start ?? range.start
+
+        while cursor < range.end {
+            if let length = calendar.range(of: .day, in: .month, for: cursor)?.count {
+                monthLengths.append(length)
+            }
+            guard let next = calendar.date(byAdding: .month, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+
+        let averageMonthLength = monthLengths.isEmpty
+            ? 30.0
+            : Double(monthLengths.reduce(0, +)) / Double(monthLengths.count)
+
+        return visibleAverage * averageMonthLength
+    }
+
+    private var averageTitle: String {
+        selectedInterval == .day
+            ? String(localized: "Hourly Average:")
+            : String(localized: "Daily Average:")
+    }
+
+    private var secondaryTitle: String {
+        selectedInterval == .total
+            ? String(localized: "Monthly Average:")
+            : String(localized: "Total:")
+    }
+
+    private var secondaryValue: Double {
+        selectedInterval == .total ? monthlyAverage : visibleTotal
+    }
+
+    private var chartTitle: String {
+        selectedInterval == .day
+            ? String(localized: "Total Hourly Dose (U)")
+            : String(localized: "Total Daily Dose (U)")
     }
 
     var body: some View {
@@ -72,7 +185,7 @@ struct TotalDailyDoseChart: View {
             statsView.padding(.bottom)
 
             VStack(alignment: .trailing) {
-                Text("Total Daily Dose (U)")
+                Text(chartTitle)
                     .foregroundStyle(.secondary)
                     .font(.footnote)
                     .padding(.bottom, 4)
@@ -86,285 +199,203 @@ struct TotalDailyDoseChart: View {
                         }
                     )
             }
-        }
-        .onAppear {
-            scrollPosition = StatChartUtils.getInitialScrollPosition(for: selectedInterval)
-            // Delay the initial update to ensure scroll position has been processed
-            DispatchQueue.main.async {
-                updateAverages()
-                updateTotalDoses()
-            }
-        }
-        .onChange(of: scrollPosition) {
-            updateTimer.scheduleUpdate {
-                updateAverages()
-                if selectedInterval == .day {
-                    updateTotalDoses()
+
+            // TEMPORARY: gesture speeds, for choosing the flick threshold on real hardware.
+            // Remove together with `InsulinScrollDebug` once the value is settled.
+            VStack(alignment: .leading, spacing: 1) {
+                Text(
+                    "chart at " + scrollPosition
+                        .formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+                        + "   header at " + committedStart.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+                )
+                Text("GESTURE SPEEDS (newest first)")
+                ForEach(Array(InsulinScrollDebug.samples.enumerated()), id: \.offset) { _, line in
+                    Text(line)
                 }
             }
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(.yellow)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 6)
         }
-        .onChange(of: selectedInterval) {
-            Task {
-                scrollPosition = StatChartUtils.getInitialScrollPosition(for: selectedInterval)
-                // Use async dispatch to ensure scroll position is updated before calculating averages
-                await MainActor.run {
-                    updateAverages()
-                    if selectedInterval == .day {
-                        updateTotalDoses()
-                    }
-                }
-            }
+        .task {
+            // Move the chart onto the current period once it has laid out. Assigning the
+            // binding synchronously from onAppear is too early and gets ignored, which left
+            // the header describing one window while the chart drew another.
+            // `chartScrollPosition(initialX:)` is not an option here: applied alongside the
+            // `x` binding it is re-applied on every re-render and pins the chart, so it stops
+            // scrolling altogether.
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            scrollPosition = openingAnchor
+            committedStart = openingAnchor
         }
+        .onChange(of: selectedInterval) { jumpToCurrentPeriod() }
+        .onChange(of: scrollPosition) { _, newValue in scheduleCommit(for: newValue) }
+        .onDisappear { settleTask?.cancel() }
     }
 
-    /// A view displaying the statistics summary including average TDD.
+    /// A view displaying the statistics summary for the settled window.
     private var statsView: some View {
-        HStack {
-            if selectedInterval == .day {
-                Grid(alignment: .leading) {
-                    GridRow {
-                        Text("Average:")
-                        Text(currentAverage.formatted(.number.precision(.fractionLength(1))))
-                            + Text("\u{00A0}") + Text("U")
-                    }
-                    GridRow {
-                        Text("Total:")
-                        Text(sumOfHourlyDoses.formatted(.number.precision(.fractionLength(1))))
-                            + Text("\u{00A0}") + Text("U")
-                    }
-                }
-                .font(.headline)
-            } else {
-                Group {
-                    Text("Average:")
-                    Text(currentAverage.formatted(.number.precision(.fractionLength(1))))
+        HStack(alignment: .top) {
+            Grid(alignment: .leading) {
+                GridRow {
+                    Text(averageTitle)
+                    Text(visibleAverage.formatted(.number.precision(.fractionLength(1))))
                         + Text("\u{00A0}") + Text("U")
                 }
-                .font(.headline)
+                GridRow {
+                    Text(secondaryTitle)
+                    Text(secondaryValue.formatted(.number.precision(.fractionLength(1))))
+                        + Text("\u{00A0}") + Text("U")
+                }
             }
+            .font(.headline)
+
             Spacer()
 
             Text(
-                StatChartUtils
-                    .formatVisibleDateRange(from: visibleDateRange.start, to: visibleDateRange.end, for: selectedInterval)
+                StatChartUtils.formatInsulinDateRange(
+                    from: visibleDateRange.start,
+                    to: visibleDateRange.end,
+                    for: selectedInterval
+                )
             )
             .font(.callout)
             .foregroundStyle(.secondary)
         }
     }
 
+    /// Whether a bar should be tinted to mark the start of a week.
+    ///
+    /// Only Sundays, and only in the month and three-month views, where the accent makes
+    /// the week divisions easy to pick out.
+    private func isWeekDivider(_ date: Date) -> Bool {
+        guard selectedInterval == .month || selectedInterval == .total else { return false }
+        return Calendar.current.component(.weekday, from: date) == 1
+    }
+
     /// A view displaying the bar chart for TDD statistics.
     private var chartsView: some View {
-        VStack(spacing: 0) { // Add a container view
-            Chart {
-                ForEach(tddStats) { stat in
-                    let isWeekend = Calendar.current.isDateInWeekend(stat.date)
-
-                    BarMark(
-                        x: .value("Date", stat.date, unit: selectedInterval == .day ? .hour : .day),
-                        y: .value("Amount", stat.amount)
-                    )
-                    .foregroundStyle(isWeekend ? Color.basal : Color.insulin)
-                    .annotation(position: .top) {
-                        if selectedInterval == .week {
-                            Text(stat.amount.formatted(.number.precision(.fractionLength(1))))
-                                .font(.footnote)
-                                .foregroundColor(Color.primary)
-                        }
-                    }
-                    .opacity(
-                        selectedDate.map { date in
-                            StatChartUtils.isSameTimeUnit(stat.date, date, for: selectedInterval) ? 1 : 0.3
-                        } ?? 1
-                    )
-                }
-                // Dummy PointMark to force SwiftCharts to render a visible domain of 00:00-23:59
-                // i.e. single day from midnight to midnight
-                if selectedInterval == .day {
-                    let calendar = Calendar.current
-                    let midnight = calendar.startOfDay(for: Date())
-                    let nextMidnight = calendar.date(byAdding: .day, value: 1, to: midnight)!
-
-                    PointMark(
-                        x: .value("Time", nextMidnight),
-                        y: .value("Dummy", 0)
-                    )
-                    .opacity(0) // ensures dummy ChartContent is hidden                    }
-                }
-                // make it possible to also show a 3day avg
-                if selectedInterval == .week {
-                    let calendar = Calendar.current
-                    let midnight = calendar.startOfDay(for: Date())
-                    let nextMidnight = calendar.date(byAdding: .day, value: 5, to: midnight)!
-
-                    PointMark(
-                        x: .value("Time", nextMidnight),
-                        y: .value("Dummy", 0)
-                    )
-                    .opacity(0) // ensures dummy ChartContent is hidden
-                }
-
-                // Line Chart for 3-Day Moving Average (Only in Weekly View)
-                if selectedInterval == .week {
-                    ForEach(tddStats) { stat in
-                        LineMark(
-                            x: .value("Date", stat.date, unit: .day),
-                            y: .value("\(String(describing: movingAverageWindowSize))-Day moving Avg of TDD", stat.movingAvgWeek)
-                        )
-                        .foregroundStyle(Color.primary.opacity(0.7))
-                        .lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 4]))
-                        .interpolationMethod(.catmullRom)
+        Chart {
+            ForEach(tddStats) { stat in
+                BarMark(
+                    x: .value("Date", stat.date, unit: selectedInterval == .day ? .hour : .day),
+                    y: .value("Amount", stat.amount)
+                )
+                .foregroundStyle(isWeekDivider(stat.date) ? Color.basal : Color.insulin)
+                .annotation(position: .top) {
+                    if selectedInterval == .week {
+                        Text(stat.amount.formatted(.number.precision(.fractionLength(1))))
+                            .font(.footnote)
+                            .foregroundColor(Color.primary)
                     }
                 }
+                .opacity(
+                    selectedBarStart.map { date in
+                        StatChartUtils.isSameTimeUnit(stat.date, date, for: selectedInterval) ? 1 : 0.3
+                    } ?? 1
+                )
+            }
 
-                // Line Chart for 7-Day Moving Average (Only in Monthly View)
-                if selectedInterval == .month {
-                    ForEach(tddStats) { stat in
-                        LineMark(
-                            x: .value("Date", stat.date, unit: .day),
-                            y: .value("\(String(describing: movingAverageWindowSize))-Day moving Avg of TDD", stat.movingAvgMonth)
-                        )
-                        .foregroundStyle(Color.primary.opacity(0.7))
-                        .lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 4]))
-                        .interpolationMethod(.catmullRom)
-                    }
-                }
-
-                // Line Chart for 21-Day Moving Average (3-Month View)
-                if selectedInterval == .total {
-                    ForEach(tddStats) { stat in
-                        LineMark(
-                            x: .value("Date", stat.date, unit: .day),
-                            y: .value("\(String(describing: movingAverageWindowSize))-Day moving Avg of TDD", stat.movingAvgTotal)
-                        )
-                        .foregroundStyle(Color.primary.opacity(0.7))
-                        .lineStyle(StrokeStyle(lineWidth: 2, dash: [4, 4]))
-                        .interpolationMethod(.catmullRom)
-                    }
-                }
-
-                // Selection popover outside of the ForEach loop!
-                if let selectedDate,
-                   let selectedTDD = getTDDForDate(selectedDate)
-                {
-                    RuleMark(
-                        x: .value("Selected Date", selectedDate)
+            if let selectedBarStart,
+               let selectedTDD = getTDDForDate(selectedBarStart)
+            {
+                RuleMark(
+                    // Centred in the bar, not on its leading edge.
+                    x: .value("Selected Date", StatChartUtils.insulinBarCenter(selectedBarStart, for: selectedInterval))
+                )
+                .foregroundStyle(Color.insulin.opacity(0.5))
+                .annotation(
+                    position: .top,
+                    spacing: 0,
+                    overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
+                ) {
+                    TDDSelectionPopover(
+                        selectedDate: selectedBarStart,
+                        tdd: selectedTDD,
+                        selectedInterval: selectedInterval,
+                        domain: visibleDateRange,
+                        chartWidth: chartWidth
                     )
-                    .foregroundStyle(Color.insulin.opacity(0.5))
-                    .annotation(
-                        position: .top,
-                        spacing: 0,
-                        overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
-                    ) {
-                        TDDSelectionPopover(
-                            selectedDate: selectedDate,
-                            tdd: selectedTDD,
-                            selectedInterval: selectedInterval,
-                            domain: visibleDateRange,
-                            chartWidth: chartWidth
-                        )
-                    }
-                }
-
-                // Dummy PointMark to force SwiftCharts to render a visible domain of 00:00-23:59
-                // i.e. single day from midnight to midnight
-                if selectedInterval == .day {
-                    let calendar = Calendar.current
-                    let midnight = calendar.startOfDay(for: Date())
-                    let nextMidnight = calendar.date(byAdding: .day, value: 1, to: midnight)!
-
-                    PointMark(
-                        x: .value("Time", nextMidnight),
-                        y: .value("Dummy", 0)
-                    )
-                    .opacity(0) // ensures dummy ChartContent is hidden
                 }
             }
-            .chartYAxis {
-                AxisMarks(position: .trailing) { value in
-                    if let amount = value.as(Double.self) {
-                        AxisValueLabel {
-                            Text(amount.formatted(.number.precision(.fractionLength(0))))
-                                .font(.footnote)
-                        }
-                        AxisGridLine()
+        }
+        .chartYAxis {
+            AxisMarks(position: .trailing) { value in
+                if let amount = value.as(Double.self) {
+                    AxisValueLabel {
+                        Text(amount.formatted(.number.precision(.fractionLength(0))))
+                            .font(.footnote)
                     }
+                    AxisGridLine()
                 }
             }
-            .chartXAxis {
-                AxisMarks(preset: .aligned, values: .stride(by: selectedInterval == .day ? .hour : .day)) { value in
-                    if let date = value.as(Date.self) {
-                        let day = Calendar.current.component(.day, from: date)
-                        let hour = Calendar.current.component(.hour, from: date)
+        }
+        .chartXAxis {
+            AxisMarks(preset: .aligned, values: .stride(by: selectedInterval == .day ? .hour : .day)) { value in
+                if let date = value.as(Date.self) {
+                    let calendar = Calendar.current
+                    let day = calendar.component(.day, from: date)
+                    let hour = calendar.component(.hour, from: date)
 
-                        switch selectedInterval {
-                        case .day:
-                            if hour % 6 == 0 { // Show only every 6 hours
-                                AxisValueLabel(format: StatChartUtils.dateFormat(for: selectedInterval), centered: true)
-                                    .font(.footnote)
-                                AxisGridLine()
-                            }
-                        case .month:
-                            let weekday = calendar.component(.weekday, from: date)
-                            if weekday == calendar.firstWeekday { // Only show the first day of the week
-                                AxisValueLabel(format: StatChartUtils.dateFormat(for: selectedInterval), centered: true)
-                                    .font(.footnote)
-                                AxisGridLine()
-                            }
-                        case .total:
-                            // Show start of every month
-                            if day == 1 {
-                                AxisValueLabel(format: StatChartUtils.dateFormat(for: selectedInterval), centered: true)
-                                    .font(.footnote)
-                                AxisGridLine()
-                            }
-                        default:
+                    switch selectedInterval {
+                    case .day:
+                        if hour % 6 == 0 { // Show only every 6 hours
                             AxisValueLabel(format: StatChartUtils.dateFormat(for: selectedInterval), centered: true)
                                 .font(.footnote)
                             AxisGridLine()
                         }
-                    }
-                }
-            }
-            .chartScrollableAxes(.horizontal)
-            .chartXSelection(value: $selectedDate.animation(.easeInOut))
-            .chartScrollPosition(x: $scrollPosition)
-            .chartScrollTargetBehavior(
-                .valueAligned(
-                    matching: selectedInterval == .day ?
-                        DateComponents(minute: 0) :
-                        DateComponents(hour: 0),
-                    majorAlignment: .matching(StatChartUtils.alignmentComponents(for: selectedInterval))
-                )
-            )
-            .chartXVisibleDomain(length: StatChartUtils.visibleDomainLength(for: selectedInterval))
-            .frame(height: 250)
-            if let windowSize = movingAverageWindowSize {
-                HStack {
-                    GeometryReader { geometry in
-                        Path { path in
-                            let width = geometry.size.width
-                            let height = geometry.size.height * 0.5
-                            path.move(to: CGPoint(x: 0, y: height))
-                            path.addLine(to: CGPoint(x: width, y: height))
+                    case .month:
+                        let weekday = calendar.component(.weekday, from: date)
+                        if weekday == calendar.firstWeekday { // Only show the first day of the week
+                            AxisValueLabel(format: StatChartUtils.dateFormat(for: selectedInterval), centered: true)
+                                .font(.footnote)
+                            AxisGridLine()
                         }
-                        .stroke(Color.primary.opacity(0.7), style: StrokeStyle(lineWidth: 2, dash: [4, 4]))
+                    case .total:
+                        if day == 1 { // Show start of every month
+                            AxisValueLabel(format: StatChartUtils.dateFormat(for: selectedInterval), centered: true)
+                                .font(.footnote)
+                            AxisGridLine()
+                        }
+                    default:
+                        AxisValueLabel(format: StatChartUtils.dateFormat(for: selectedInterval), centered: true)
+                            .font(.footnote)
+                        AxisGridLine()
                     }
-                    .frame(width: 20, height: 10)
-                    Text("\(windowSize)-Day Moving Average of TDD")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Spacer()
                 }
-                .padding(.top, 10)
             }
         }
-    }
-
-    /// Determines the moving average window size based on the selected duration.
-    /// Determines the moving average window size based on the selected interval.
-    private var movingAverageWindowSize: Int? {
-        Stat.StateModel.windowSizeAverages(for: selectedInterval)
+        // An explicit domain keeps every reachable page on a calendar boundary, and removes
+        // the need for invisible padding marks to stretch the plotted range.
+        .chartXScale(domain: scrollDomain)
+        .chartScrollableAxes(.horizontal)
+        // The chart owns its scroll position and reports it through this binding. Do not also
+        // apply `chartScrollPosition(initialX:)`: combining the two pins the chart, and it
+        // stops scrolling entirely. Do not assign this binding on appear either -- that
+        // overwrites the position the chart just reported, leaving the header describing one
+        // window while the chart draws another.
+        .chartScrollPosition(x: $scrollPosition)
+        // Charts' own selection, which the chart coordinates with its own scroll handling.
+        //
+        // Do not replace this with a hand-rolled `chartGesture`. A LongPressGesture sequenced
+        // before a DragGesture was tried here and it swallowed one-finger touches before the
+        // scroll view ever saw them: the chart could then only be scrolled with two fingers,
+        // and because the sequenced drag has to exist before the gesture reports anything, a
+        // stationary press showed no popover at all.
+        .chartXSelection(value: $rawSelection.animation(.easeInOut))
+        .chartXVisibleDomain(length: StatChartUtils.insulinVisibleDomainLength(for: selectedInterval))
+        // A flick turns whole pages, a drag settles where it was released, and neither
+        // coasts. Charts' two stock behaviours each do only one of those: `.valueAligned`
+        // coasts before snapping, `.paging` never reaches a custom range.
+        .chartScrollTargetBehavior(
+            InsulinPagingScrollBehavior(
+                domain: scrollDomain,
+                releaseStart: StatChartUtils.insulinNormalizedStart(scrollPosition, for: selectedInterval),
+                interval: selectedInterval
+            )
+        )
+        .frame(height: 250)
     }
 }
 
@@ -384,6 +415,11 @@ private struct TDDSelectionPopover: View {
 
     @State private var popoverSize: CGSize = .zero
 
+    /// The middle of the selected bar, which is where the rule mark is drawn.
+    private var barCenter: Date {
+        StatChartUtils.insulinBarCenter(selectedDate, for: selectedInterval)
+    }
+
     @Environment(\.colorScheme) var colorScheme
 
     private var timeText: String {
@@ -397,7 +433,7 @@ private struct TDDSelectionPopover: View {
 
     private func xOffset() -> CGFloat {
         // If the selected date is outside the visible domain, hide the popover
-        guard selectedDate >= domain.start && selectedDate <= domain.end else { return 0 }
+        guard barCenter >= domain.start && barCenter <= domain.end else { return 0 }
 
         let domainDuration = domain.end.timeIntervalSince(domain.start)
         guard domainDuration > 0, chartWidth > 0 else { return 0 }
@@ -406,7 +442,7 @@ private struct TDDSelectionPopover: View {
         let padding: CGFloat = 10 // Padding from screen edges
 
         // Convert dates to pixel'd x-position
-        let dateFraction = selectedDate.timeIntervalSince(domain.start) / domainDuration
+        let dateFraction = barCenter.timeIntervalSince(domain.start) / domainDuration
         let x_selected = dateFraction * chartWidth
 
         // Calculate popover edges
@@ -463,6 +499,6 @@ private struct TDDSelectionPopover: View {
         // Apply calculated xOffset to keep within bounds
         .offset(x: xOffset(), y: 0)
         // Hide popover if selected date is outside visible domain
-        .opacity(selectedDate >= domain.start && selectedDate <= domain.end ? 1 : 0)
+        .opacity(barCenter >= domain.start && barCenter <= domain.end ? 1 : 0)
     }
 }
