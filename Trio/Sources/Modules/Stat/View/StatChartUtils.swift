@@ -9,9 +9,9 @@
 enum InsulinScrollDebug {
     nonisolated(unsafe) static var samples: [String] = []
 
-    static func record(velocity: CGFloat, threshold: CGFloat) {
-        let speed = abs(velocity)
-        let line = String(format: "%5.0f pt/s  %@", speed, speed < threshold ? "drag" : "FLICK")
+    static func record(periodsProjected: Double, threshold: Double) {
+        let magnitude = abs(periodsProjected)
+        let line = String(format: "%+.2f periods  %@", periodsProjected, magnitude < threshold ? "drag" : "FLICK")
         samples.insert(line, at: 0)
         if samples.count > 5 { samples.removeLast() }
     }
@@ -45,19 +45,12 @@ struct InsulinPagingScrollBehavior: ChartScrollTargetBehavior {
     /// The mode being displayed.
     let interval: Stat.StateModel.StatsTimeInterval
 
-    /// Points per second at which a gesture stops being a drag and becomes a flick.
-    /// Tune this single value if flicks feel too eager or too reluctant.
-    private var flickThreshold: CGFloat { 250 }
-
-    /// How many whole periods a flick covers. A firmer flick travels further, but always in
-    /// whole periods, so the chart never comes to rest mid-period.
-    private func periodCount(forSpeed speed: CGFloat) -> Int {
-        switch speed {
-        case ..<900: return 1
-        case ..<1800: return 2
-        default: return 3
-        }
-    }
+    /// Momentum shorter than half a period reads as a drag, anything longer as a page turn.
+    ///
+    /// Half a period is not a tuned constant: it is the point at which rounding the
+    /// projection to whole periods first yields one. That keeps the behaviour self-calibrating
+    /// across devices, rather than depending on a number picked against one machine's feel.
+    private var dragCutoff: Double { 0.5 }
 
     func updateTarget(_ target: inout ScrollTarget, context: ChartScrollTargetBehaviorContext) {
         let contentWidth = context.contentSize.width
@@ -71,26 +64,31 @@ struct InsulinPagingScrollBehavior: ChartScrollTargetBehavior {
             CGFloat(date.timeIntervalSince(domain.lowerBound) / span) * contentWidth
         }
 
-        let speed = abs(context.velocity.dx)
-        InsulinScrollDebug.record(velocity: context.velocity.dx, threshold: flickThreshold)
+        // How far the scroll view's own momentum would carry the chart, measured in whole
+        // periods. This stands in for gesture speed, because `context.velocity` is always
+        // zero here -- confirmed on real hardware, not just in the simulator -- so anything
+        // keyed off it can never fire. A flick projects a long way; a drag barely projects.
+        let projected = date(atOffset: target.rect.origin.x)
+        let periodLength = StatChartUtils.insulinVisibleDomainLength(for: interval)
+        let periodsProjected = projected.timeIntervalSince(releaseStart) / periodLength
+
+        InsulinScrollDebug.record(periodsProjected: periodsProjected, threshold: dragCutoff)
+
         let destination: Date
 
-        if speed < flickThreshold {
-            // A drag. Settle on the bar the window was actually on when the finger lifted.
-            //
-            // Deliberately NOT derived from `target.rect`: that is the scroll view's
-            // momentum-projected landing point, and even a slow drag carries enough
-            // projection to throw the window well past where the user let go.
+        if abs(periodsProjected) < dragCutoff {
+            // A drag. Settle on the bar the window was on when the finger lifted, rather
+            // than on the projection, so it does not glide past where the user let go.
             destination = StatChartUtils.insulinSnapToBar(releaseStart, for: interval)
         } else {
-            // A flick. Move whole periods from the page the gesture started on, discarding
-            // however far the momentum would have carried the chart.
+            // A flick. Round the projection to whole periods and move that many from the
+            // page we started on, so the chart never comes to rest mid-period.
             let anchor = StatChartUtils.insulinPeriodStart(containing: releaseStart, for: interval)
-            let forward = target.rect.origin.x > offset(for: releaseStart)
-            var steps = periodCount(forSpeed: speed)
+            let forward = periodsProjected > 0
+            var steps = max(1, Int(abs(periodsProjected).rounded()))
 
-            // Travelling backwards from a mid-period position, the boundary we have already
-            // passed is the first stop, so it costs nothing.
+            // Travelling back from a mid-period position, the boundary already passed is the
+            // first stop, so it costs nothing.
             if !forward, anchor != releaseStart {
                 steps -= 1
             }
