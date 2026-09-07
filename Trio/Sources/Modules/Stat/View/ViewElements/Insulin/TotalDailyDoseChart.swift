@@ -190,6 +190,11 @@ struct TotalDailyDoseChart: View {
             // TEMPORARY: gesture speeds, for choosing the flick threshold on real hardware.
             // Remove together with `InsulinScrollDebug` once the value is settled.
             VStack(alignment: .leading, spacing: 1) {
+                Text(
+                    "chart at " + scrollPosition
+                        .formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute())
+                        + "   header at " + committedStart.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+                )
                 Text("GESTURE SPEEDS (newest first)")
                 ForEach(Array(InsulinScrollDebug.samples.enumerated()), id: \.offset) { _, line in
                     Text(line)

@@ -11,7 +11,10 @@ enum InsulinScrollDebug {
 
     static func record(periodsProjected: Double, threshold: Double) {
         let magnitude = abs(periodsProjected)
-        let line = String(format: "%+.2f periods  %@", periodsProjected, magnitude < threshold ? "drag" : "FLICK")
+        // Charts calls the behaviour again as a flick's animation comes to rest, with a near-zero
+        // projection. Label those so they are not mistaken for a misclassified flick.
+        let kind = magnitude < 0.05 ? "(settle)" : magnitude < threshold ? "drag" : "FLICK"
+        let line = String(format: "%+.2f periods  %@", periodsProjected, kind)
         samples.insert(line, at: 0)
         if samples.count > 5 { samples.removeLast() }
     }
@@ -77,27 +80,33 @@ struct InsulinPagingScrollBehavior: ChartScrollTargetBehavior {
         let destination: Date
 
         if abs(periodsProjected) < dragCutoff {
-            // A drag. Settle on the bar the window was on when the finger lifted, rather
-            // than on the projection, so it does not glide past where the user let go.
-            destination = StatChartUtils.insulinSnapToBar(releaseStart, for: interval)
+            // A drag, or the settle callback Charts issues after a flick finishes animating.
+            // Round the projection itself to the nearest bar. For a slow drag the projection
+            // is where the finger let go; for the settle callback it is already on a boundary,
+            // so this leaves it alone. Re-snapping to `releaseStart` here dragged the chart
+            // back toward the pre-flick position after every page turn.
+            destination = StatChartUtils.insulinNormalizedStart(projected, for: interval)
         } else {
-            // A flick. Round the projection to whole periods and move that many from the
-            // page we started on, so the chart never comes to rest mid-period.
-            let anchor = StatChartUtils.insulinPeriodStart(containing: releaseStart, for: interval)
-            let forward = periodsProjected > 0
-            var steps = max(1, Int(abs(periodsProjected).rounded()))
+            // A flick. Land on the period boundary nearest to where the momentum would have
+            // carried the chart, so a firmer flick covers more periods but the chart never
+            // comes to rest mid-period.
+            //
+            // The landing point is derived from the projection alone. `releaseStart` is a
+            // snapshot from the last SwiftUI render and can lag a fast gesture by a couple of
+            // days on real hardware; measuring the destination from it landed the chart on
+            // arbitrary weekdays. Here it is used only to guarantee the flick actually leaves
+            // the current page, where a small lag cannot change the outcome.
+            let floorBoundary = StatChartUtils.insulinPeriodStart(containing: projected, for: interval)
+            let nextBoundary = StatChartUtils.insulinPage(from: floorBoundary, steps: 1, for: interval)
+            let midpoint = floorBoundary.addingTimeInterval(nextBoundary.timeIntervalSince(floorBoundary) / 2)
+            var landing = projected >= midpoint ? nextBoundary : floorBoundary
 
-            // Travelling back from a mid-period position, the boundary already passed is the
-            // first stop, so it costs nothing.
-            if !forward, anchor != releaseStart {
-                steps -= 1
+            let currentPage = StatChartUtils.insulinPeriodStart(containing: releaseStart, for: interval)
+            if landing == currentPage {
+                landing = StatChartUtils.insulinPage(from: currentPage, steps: periodsProjected > 0 ? 1 : -1, for: interval)
             }
 
-            destination = StatChartUtils.insulinPage(
-                from: anchor,
-                steps: forward ? steps : -steps,
-                for: interval
-            )
+            destination = landing
         }
 
         let clamped = min(max(destination, domain.lowerBound), domain.upperBound)
