@@ -2,6 +2,89 @@ import Charts
 import Foundation
 import SwiftUI
 
+/// Scroll behaviour for the insulin chart: a flick turns whole pages, a drag settles where
+/// it was released, and neither coasts.
+///
+/// Charts ships two behaviours and neither does both. `.valueAligned` keeps the scroll view's
+/// momentum and only snaps once it has glided to a stop, so a swipe reads as a drag that
+/// happens to land tidily. `.paging` never coasts but only knows page boundaries, so a custom
+/// range such as Wednesday-to-Tuesday becomes unreachable.
+///
+/// This is the same decision the Health app makes in UIKit's
+/// `scrollViewWillEndDragging(_:withVelocity:targetContentOffset:)`: look at how fast the
+/// finger was moving, then overwrite where the scroll is about to land.
+///
+/// - Note: Offsets are converted to dates arithmetically from the domain and the scroll
+///   content's width. An earlier version read `proxy.value(atX: target.rect.origin.x)`, which
+///   mixes a scroll-content offset into an API that works in plot-area coordinates; the
+///   resulting targets were meaningless and the chart barely scrolled at all.
+struct InsulinPagingScrollBehavior: ChartScrollTargetBehavior {
+    /// The chart's full scrollable date range.
+    let domain: ClosedRange<Date>
+    /// The window start as the gesture ends, before any momentum is applied.
+    let releaseStart: Date
+    /// The mode being displayed.
+    let interval: Stat.StateModel.StatsTimeInterval
+
+    /// Points per second at which a gesture stops being a drag and becomes a flick.
+    /// Tune this single value if flicks feel too eager or too reluctant.
+    private var flickThreshold: CGFloat { 250 }
+
+    /// How many whole periods a flick covers. A firmer flick travels further, but always in
+    /// whole periods, so the chart never comes to rest mid-period.
+    private func periodCount(forSpeed speed: CGFloat) -> Int {
+        switch speed {
+        case ..<900: return 1
+        case ..<1800: return 2
+        default: return 3
+        }
+    }
+
+    func updateTarget(_ target: inout ScrollTarget, context: ChartScrollTargetBehaviorContext) {
+        let contentWidth = context.contentSize.width
+        let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
+        guard contentWidth > 0, span > 0 else { return }
+
+        func date(atOffset x: CGFloat) -> Date {
+            domain.lowerBound.addingTimeInterval(Double(x / contentWidth) * span)
+        }
+        func offset(for date: Date) -> CGFloat {
+            CGFloat(date.timeIntervalSince(domain.lowerBound) / span) * contentWidth
+        }
+
+        let speed = abs(context.velocity.dx)
+        let destination: Date
+
+        if speed < flickThreshold {
+            // A drag. Settle on the bar under the finger. Derived from the target rather than
+            // from `releaseStart` so the common case depends only on values Charts hands us;
+            // at this speed the momentum built into the target is negligible.
+            destination = StatChartUtils.insulinSnapToBar(date(atOffset: target.rect.origin.x), for: interval)
+        } else {
+            // A flick. Move whole periods from the page the gesture started on, discarding
+            // however far the momentum would have carried the chart.
+            let anchor = StatChartUtils.insulinPeriodStart(containing: releaseStart, for: interval)
+            let forward = target.rect.origin.x > offset(for: releaseStart)
+            var steps = periodCount(forSpeed: speed)
+
+            // Travelling backwards from a mid-period position, the boundary we have already
+            // passed is the first stop, so it costs nothing.
+            if !forward, anchor != releaseStart {
+                steps -= 1
+            }
+
+            destination = StatChartUtils.insulinPage(
+                from: anchor,
+                steps: forward ? steps : -steps,
+                for: interval
+            )
+        }
+
+        let clamped = min(max(destination, domain.lowerBound), domain.upperBound)
+        target.rect.origin.x = offset(for: clamped)
+    }
+}
+
 enum StatChartUtils {
     /// Returns the time interval length for the visible domain based on the selected duration.
     /// - Parameter selectedInterval: The selected time interval for statistics.
@@ -270,6 +353,26 @@ enum StatChartUtils {
         case .month,
              .total:
             return calendar.dateInterval(of: .month, for: date)?.start ?? calendar.startOfDay(for: date)
+        }
+    }
+
+    /// Moves `steps` whole periods from a period boundary, using calendar arithmetic so a
+    /// month step lands on the 1st of the next month rather than 31 days later.
+    static func insulinPage(
+        from periodStart: Date,
+        steps: Int,
+        for selectedInterval: Stat.StateModel.StatsTimeInterval
+    ) -> Date {
+        let calendar = Calendar.current
+
+        switch selectedInterval {
+        case .day:
+            return calendar.date(byAdding: .day, value: steps, to: periodStart) ?? periodStart
+        case .week:
+            return calendar.date(byAdding: .weekOfYear, value: steps, to: periodStart) ?? periodStart
+        case .month,
+             .total:
+            return calendar.date(byAdding: .month, value: steps, to: periodStart) ?? periodStart
         }
     }
 

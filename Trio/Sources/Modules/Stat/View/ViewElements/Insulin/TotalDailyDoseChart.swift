@@ -354,14 +354,16 @@ struct TotalDailyDoseChart: View {
         // stationary press showed no popover at all.
         .chartXSelection(value: $rawSelection.animation(.easeInOut))
         .chartXVisibleDomain(length: StatChartUtils.insulinVisibleDomainLength(for: selectedInterval))
-        // Charts' own paging behaviour: one page per swipe, no free-coasting. `.valueAligned`
-        // was tried here and keeps the scroll view's momentum, only snapping once it has
-        // glided to a stop, which reads as a drag that lands tidily rather than a page turn.
-        //
-        // The visible window is exactly one period wide and the domain's lower bound sits on
-        // a period boundary, so every page edge is a real boundary: midnight, a Sunday, or
-        // the 1st of a month.
-        .chartScrollTargetBehavior(.paging)
+        // A flick turns whole pages, a drag settles where it was released, and neither
+        // coasts. Charts' two stock behaviours each do only one of those: `.valueAligned`
+        // coasts before snapping, `.paging` never reaches a custom range.
+        .chartScrollTargetBehavior(
+            InsulinPagingScrollBehavior(
+                domain: scrollDomain,
+                releaseStart: StatChartUtils.insulinNormalizedStart(scrollPosition, for: selectedInterval),
+                interval: selectedInterval
+            )
+        )
         .frame(height: 250)
     }
 }
