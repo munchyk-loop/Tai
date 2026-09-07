@@ -354,22 +354,14 @@ struct TotalDailyDoseChart: View {
         // stationary press showed no popover at all.
         .chartXSelection(value: $rawSelection.animation(.easeInOut))
         .chartXVisibleDomain(length: StatChartUtils.insulinVisibleDomainLength(for: selectedInterval))
-        // Charts' own value-aligned behaviour. A hand-rolled ChartScrollTargetBehavior was
-        // tried here and mixed up two coordinate spaces: ScrollTarget.rect is a scroll-content
-        // offset, while ChartProxy.value(atX:)/position(forX:) work in plot-area coordinates.
-        // Feeding one to the other produced nonsense targets, so the chart was yanked back on
-        // every gesture and barely scrolled at all.
+        // Charts' own paging behaviour: one page per swipe, no free-coasting. `.valueAligned`
+        // was tried here and keeps the scroll view's momentum, only snapping once it has
+        // glided to a stop, which reads as a drag that lands tidily rather than a page turn.
         //
-        // `matching` is where a slow drag settles, `majorAlignment` is where a swipe lands,
-        // and `.always` forces the per-gesture limit that `.automatic` applies only to views
-        // that are compact along the scroll axis.
-        .chartScrollTargetBehavior(
-            .valueAligned(
-                matching: StatChartUtils.insulinMinorAlignment(for: selectedInterval),
-                majorAlignment: .matching(StatChartUtils.insulinMajorAlignment(for: selectedInterval)),
-                limitBehavior: .always
-            )
-        )
+        // The visible window is exactly one period wide and the domain's lower bound sits on
+        // a period boundary, so every page edge is a real boundary: midnight, a Sunday, or
+        // the 1st of a month.
+        .chartScrollTargetBehavior(.paging)
         .frame(height: 250)
     }
 }
