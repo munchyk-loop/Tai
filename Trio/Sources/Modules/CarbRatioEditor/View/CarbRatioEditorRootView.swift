@@ -255,6 +255,8 @@ extension CarbRatioEditor {
                     AxisGridLine(centered: true, stroke: StrokeStyle(lineWidth: 1, dash: [2, 4]))
                 }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Carb ratio profile chart, 24 hours"))
         }
     }
 }

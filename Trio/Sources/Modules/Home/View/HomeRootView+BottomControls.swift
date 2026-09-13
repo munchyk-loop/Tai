@@ -200,6 +200,16 @@ extension Home.RootView {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text("Alarms"))
+        .accessibilityValue(Text(
+            isSnoozed
+                ? String(
+                    format: String(localized: "snoozed, %d minutes remaining", comment: "Accessibility: alarm snooze"),
+                    remainingMinutes
+                )
+                : String(localized: "active", comment: "Accessibility: alarms active")
+        ))
+        .accessibilityHint(Text(String(localized: "Opens snooze options", comment: "Accessibility hint")))
+        .accessibilityAddTraits(.isButton)
     }
 
     // MARK: - Multi-use panel (stats banner / prioritized warnings)
@@ -270,6 +280,7 @@ extension Home.RootView {
             .foregroundStyle(tint)
             .frame(width: 30, height: 30)
             .background(Circle().fill(tint.opacity(0.18)))
+            .accessibilityHidden(true)
     }
 
     /// Shared chrome for the non-stats panel states.
@@ -739,6 +750,9 @@ extension Home.RootView {
             .onTapGesture {
                 cancelAction()
             }
+            .accessibilityLabel(Text("Stop adjustment"))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { cancelAction() }
     }
 
     @ViewBuilder func adjustmentsCancelTempTargetView() -> some View {
@@ -762,6 +776,13 @@ extension Home.RootView {
                     isConfirmStopTempTargetShown = true
                 }
             }
+            .accessibilityLabel(Text("Stop temp target"))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
+                if !latestTempTarget.isEmpty {
+                    isConfirmStopTempTargetShown = true
+                }
+            }
     }
 
     @ViewBuilder func adjustmentsCancelOverrideView() -> some View {
@@ -781,6 +802,13 @@ extension Home.RootView {
                 ]
             )
             .onTapGesture {
+                if !latestOverride.isEmpty {
+                    isConfirmStopOverridePresented = true
+                }
+            }
+            .accessibilityLabel(Text("Stop override"))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction {
                 if !latestOverride.isEmpty {
                     isConfirmStopOverridePresented = true
                 }
@@ -948,6 +976,7 @@ extension Home.RootView {
                         .resizable()
                         .frame(width: 25, height: 25)
                         .foregroundColor(Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902))
+                        .accessibilityHidden(true)
 
                     Spacer()
                     Group {
@@ -956,6 +985,9 @@ extension Home.RootView {
                         Text(bolusString)
                             .font(.subheadline)
                     }.padding(.leading, 5)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Text(bolusLabel))
+                        .accessibilityValue(Text(bolusString))
 
                     Spacer()
 
@@ -971,6 +1003,7 @@ extension Home.RootView {
                                     Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
                                 )
                         }
+                        .accessibilityLabel(Text("Cancel bolus"))
                     } else if state.bolusStatus == .initiating {
                         ProgressView()
                     }

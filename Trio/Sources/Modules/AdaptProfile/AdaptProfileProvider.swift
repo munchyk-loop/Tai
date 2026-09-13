@@ -250,7 +250,7 @@ extension AdaptProfile {
         }
 
         var supportedBasalRates: [Decimal]? {
-            deviceManager.pumpManager?.supportedBasalRates.map { Decimal($0) }
+            deviceManager.pumpManager?.supportedBasalRates.map { Decimal($0).rounded(scale: 3) }
         }
 
         func activate(

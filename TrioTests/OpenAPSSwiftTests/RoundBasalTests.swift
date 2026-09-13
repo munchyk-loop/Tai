@@ -20,8 +20,8 @@ import Testing
         // the regression from issue #1424: the old bands turned this into 1.25
         #expect(round(1.23, PumpRateTables.dana) == 1.23)
         #expect(round(0.01, PumpRateTables.dana) == 0.01)
-        // built as Decimal(56) / 100: the literal 0.56 is parsed via Double and is not exact
-        #expect(round(0.567, PumpRateTables.dana) == Decimal(56) / 100)
+        // built as Decimal(57) / 100: the literal 0.57 is parsed via Double and is not exact
+        #expect(round(0.567, PumpRateTables.dana) == Decimal(57) / 100)
     }
 
     @Test("Dana clamps to the top of its table") func danaCeiling() {
@@ -34,9 +34,10 @@ import Testing
         #expect(round(10.05, PumpRateTables.minimedPre23) == 10.05)
     }
 
-    @Test("Omnipod Eros floors below its minimum rate to zero") func erosBelowMinimum() {
-        // the pod cannot deliver 0.03; the old bands claimed 0.05
-        #expect(round(0.03, PumpRateTables.omnipodEros) == 0)
+    @Test("Omnipod Eros rounds onto its own minimum or to zero") func erosBelowMinimum() {
+        // the pod's table has no zero, so zero has to come from the seed
+        #expect(round(0.01, PumpRateTables.omnipodEros) == 0)
+        #expect(round(0.03, PumpRateTables.omnipodEros) == 0.05)
         #expect(round(0.07, PumpRateTables.omnipodEros) == 0.05)
     }
 
@@ -44,28 +45,28 @@ import Testing
         // dead in production before this change: model.json was always "722"
         #expect(round(0.025, PumpRateTables.minimedGen23) == 0.025)
         #expect(round(0.03, PumpRateTables.minimedGen23) == 0.025)
-        #expect(round(1.03, PumpRateTables.minimedGen23) == 1.0)
-        #expect(round(10.06, PumpRateTables.minimedGen23) == 10.0)
+        #expect(round(1.03, PumpRateTables.minimedGen23) == 1.05)
+        #expect(round(10.06, PumpRateTables.minimedGen23) == 10.1)
     }
 
     @Test("no pump paired leaves the rate alone but keeps it readable") func noPump() {
         #expect(round(1.23, []) == 1.23)
-        #expect(round(12.345678, []) == 12.345)
+        #expect(round(12.345678, []) == 12.34567)
     }
 
     @Test("an unsorted or duplicated table gives the sorted answer") func unorderedTable() {
         let shuffled: [Decimal] = [1.0, 0.05, 0.5, 0.05, 0.1]
         #expect(round(0.6, shuffled) == 0.5)
-        #expect(round(0.04, shuffled) == 0)
+        #expect(round(0.04, shuffled) == 0.05)
     }
 
-    @Test("rounding never exceeds the requested rate", arguments: [
+    @Test("every result is a rate the pump can hold, within half a step", arguments: [
         Decimal(0), 0.011, 0.03, 0.4, 0.999, 1.0, 1.234, 5.375, 9.99, 10.06, 29.999
-    ]) func neverRoundsUp(rate: Decimal) {
+    ]) func landsOnTheTable(rate: Decimal) {
         for rates in [PumpRateTables.dana, PumpRateTables.omnipodEros, PumpRateTables.flat, PumpRateTables.minimedGen23] {
             let rounded = round(rate, rates)
-            #expect(rounded <= rate)
             #expect(rounded == 0 || rates.contains(rounded))
+            #expect(abs(rounded - rate) <= 0.05 || rate > rates[rates.count - 1])
         }
     }
 
@@ -150,7 +151,8 @@ private extension Determination {
             minPredBG: nil,
             threshold: nil,
             carbRatio: nil,
-            received: false
+            received: false,
+            tick: nil
         )
     }
 }

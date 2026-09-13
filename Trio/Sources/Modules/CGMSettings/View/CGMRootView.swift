@@ -71,6 +71,7 @@ extension CGMSettings {
                                         label: {
                                             HStack {
                                                 Image(systemName: "questionmark.circle")
+                                                    .accessibilityLabel(Text("More information"))
                                             }
                                         }
                                     ).buttonStyle(BorderlessButtonStyle())
@@ -178,169 +179,166 @@ extension CGMSettings {
         }
 
         var body: some View {
-            NavigationView {
-                Form {
-                    cgmIntegrationSection
+            List {
+                cgmIntegrationSection
 
-                    if state.cgmCurrent.type == .plugin && state.cgmCurrent.id.contains("Libre") {
-                        Section {
-                            NavigationLink(
-                                destination: Calibrations.RootView(resolver: resolver),
-                                label: { Text("Libre Calibrations") }
-                            )
-                        }.listRowBackground(Color.chart)
-                    }
-
-                    smoothGlucoseSection
-
-                    smoothingAlgorithmSection
-                }
-                .scrollContentBackground(.hidden).background(appState.trioBackgroundColor(for: colorScheme))
-                .onAppear(perform: configureView)
-                .navigationTitle("CGM")
-                .navigationBarTitleDisplayMode(.automatic)
-                .settingsHighlightScroll()
-                .navigationBarItems(leading: displayClose ? Button("Close", action: state.hideModal) : nil)
-                .sheet(isPresented: $state.shouldDisplayCGMSetupSheet) {
-                    switch state.cgmCurrent.type {
-                    case .nightscout,
-                         .none,
-                         .simulator,
-                         .xdrip:
-
-                        CustomCGMOptionsView(
-                            resolver: self.resolver,
-                            state: state,
-                            cgmCurrent: state.cgmCurrent,
-                            deleteCGM: state.deleteCGM
+                if state.cgmCurrent.type == .plugin && state.cgmCurrent.id.contains("Libre") {
+                    Section {
+                        NavigationLink(
+                            destination: Calibrations.RootView(resolver: resolver),
+                            label: { Text("Libre Calibrations") }
                         )
+                    }.listRowBackground(Color.chart)
+                }
 
-                    case .plugin:
-                        if let fetchGlucoseManager = state.fetchGlucoseManager,
-                           let cgmManager = fetchGlucoseManager.cgmManager,
-                           state.cgmCurrent.type == fetchGlucoseManager.cgmGlucoseSourceType,
-                           state.cgmCurrent.id == fetchGlucoseManager.cgmGlucosePluginId
-                        {
-                            CGMSettingsView(
-                                cgmManager: cgmManager,
-                                bluetoothManager: state.provider.apsManager.bluetoothManager!,
-                                unit: state.settingsManager.settings.units,
-                                completionDelegate: state
-                            )
-                        } else {
-                            CGMSetupView(
-                                CGMType: state.cgmCurrent,
-                                bluetoothManager: state.provider.apsManager.bluetoothManager!,
-                                unit: state.settingsManager.settings.units,
-                                completionDelegate: state,
-                                setupDelegate: state,
-                                pluginCGMManager: self.state.pluginCGMManager
-                            ).onDisappear {
-                                if state.fetchGlucoseManager.cgmGlucoseSourceType == .none {
-                                    state.cgmCurrent = cgmDefaultModel
-                                }
+                smoothGlucoseSection
+
+                smoothingAlgorithmSection
+            }
+            .scrollContentBackground(.hidden).background(appState.trioBackgroundColor(for: colorScheme))
+            .onAppear(perform: configureView)
+            .navigationTitle("CGM")
+            .navigationBarTitleDisplayMode(.automatic)
+            .settingsHighlightScroll()
+            .sheet(isPresented: $state.shouldDisplayCGMSetupSheet) {
+                switch state.cgmCurrent.type {
+                case .nightscout,
+                     .none,
+                     .simulator,
+                     .xdrip:
+
+                    CustomCGMOptionsView(
+                        resolver: self.resolver,
+                        state: state,
+                        cgmCurrent: state.cgmCurrent,
+                        deleteCGM: state.deleteCGM
+                    )
+
+                case .plugin:
+                    if let fetchGlucoseManager = state.fetchGlucoseManager,
+                       let cgmManager = fetchGlucoseManager.cgmManager,
+                       state.cgmCurrent.type == fetchGlucoseManager.cgmGlucoseSourceType,
+                       state.cgmCurrent.id == fetchGlucoseManager.cgmGlucosePluginId
+                    {
+                        CGMSettingsView(
+                            cgmManager: cgmManager,
+                            bluetoothManager: state.provider.apsManager.bluetoothManager!,
+                            unit: state.settingsManager.settings.units,
+                            completionDelegate: state
+                        )
+                    } else {
+                        CGMSetupView(
+                            CGMType: state.cgmCurrent,
+                            bluetoothManager: state.provider.apsManager.bluetoothManager!,
+                            unit: state.settingsManager.settings.units,
+                            completionDelegate: state,
+                            setupDelegate: state,
+                            pluginCGMManager: self.state.pluginCGMManager
+                        ).onDisappear {
+                            if state.fetchGlucoseManager.cgmGlucoseSourceType == .none {
+                                state.cgmCurrent = cgmDefaultModel
                             }
                         }
                     }
                 }
-                .sheet(isPresented: $shouldDisplayHint1) {
-                    SettingInputHintView(
-                        hintDetent: $hintDetent,
-                        shouldDisplayHint: $shouldDisplayHint1,
-                        hintLabel: "CGM Models",
-                        hintText: Text(
-                            "Current CGM Models Supported:\n\n" +
-                                "• Accu-Chek SmartGuide\n" +
-                                "• Dexcom G5\n" +
-                                "• Dexcom G6 / ONE\n" +
-                                "• Dexcom G7 / ONE+\n" +
-                                "• Dexcom Share\n" +
-                                "• Eversense E3/365\n" +
-                                "• Freestyle Libre\n" +
-                                "• Freestyle Libre Demo\n" +
-                                "• Glucose Simulator\n" +
-                                "• Nightscout\n" +
-                                "• xDrip4iOS\n\n" +
-                                "Note: The CGM Heartbeat can come from either a CGM or a pump to wake up Trio when phone is locked or in the background. If CGM is on the same phone as Trio and xDrip4iOS is configured to use the same AppGroup as Trio and the heartbeat feature is turned on in xDrip4iOS, then the CGM can provide a heartbeat to wake up Trio when phone is locked or app is in the background."
-                        ),
-                        sheetTitle: String(localized: "Help", comment: "Help sheet title")
-                    )
-                }
-                .sheet(isPresented: $shouldDisplayHint2) {
-                    SettingInputHintView(
-                        hintDetent: $hintDetent,
-                        shouldDisplayHint: $shouldDisplayHint2,
-                        hintLabel: "Smoothing Algorithms",
-                        hintText: Text(
-                            "Available smoothing algorithms:\n\n" +
-                                "• Second Order Exponential\n" +
-                                "• Tsunami Unscented Kalman Filter\n" +
-                                "• Adaptive UKF Smoothing\n\n" +
-                                "Default: Exponential\n\n" +
-                                "Second-Order Exponential Smoothing\n\n" +
-                                "Benefit: provides a simple, fast filter that smooths CGM values and captures approximately linear trends with minimal computation.\n\n" +
-                                "Second-order exponential smoothing (Holt's linear method) tracks both the level and the trend of a time series with two recursive updates.\n\n" +
-                                "Unscented Kalman Filter (UKF)\n\n" +
-                                "Benefit: adapts automatically to changing sensor quality and outliers while preserving real glucose dynamics with less lag.\n\n" +
-                                "The UKF maintains a state vector xₜ = [Gₜ, Ġₜ]ᵀ (glucose Gₜ and its rate of change Ġₜ) and a covariance matrix Pₜ that represent both the estimate and its uncertainty.\n\n" +
-                                "Each step predicts the state with a nonlinear process model, then fuses the new CGM value zₜ using a measurement-noise term Rₜ and the innovation νₜ = zₜ − ẑₜ.\n\n" +
-                                "In the Tsunami adaptation, Rₜ is learned online from recent νₜ values using dual-rate updates (fast and slow), and suspicious points are handled softly by inflating an effective Rₑ instead of discarding them.\n\n" +
-                                "A Rauch–Tung–Striebel (RTS) smoother then runs backward over each segment, using a smoothing gain Cₜ = Pₜ · Fₜᵀ · (P̂ₜ)⁻¹ to reduce lag and sharpen the final smoothed glucose curve.\n\n" +
-                                "Adaptive UKF Smoothing\n\n" +
-                                "Benefit: the newest generation of the UKF (AAPS Boost variant), with a statistically corrected noise estimator, faster trend detection, and protection against sensor-compression lows.\n\n" +
-                                "It uses the same [Gₜ, Ġₜ] state model as the UKF, but learns Rₜ by subtracting the predicted variance from the innovation statistics, ramps outlier down-weighting in gently from 2σ (Huber-style), and detects genuine fast moves with a 2-of-3 same-sign gate so it accelerates onto real trends sooner.\n\n" +
-                                "A steep drop below 75 mg/dL with little insulin on board is treated as a probable sensor-compression low and heavily down-weighted for at most 3 readings — a real, insulin-driven low always passes through."
-                        ),
-                        sheetTitle: String(localized: "Help", comment: "Help sheet title")
-                    )
-                }
-                .sheet(isPresented: $shouldDisplayHint) {
-                    SettingInputHintView(
-                        hintDetent: $hintDetent,
-                        shouldDisplayHint: $shouldDisplayHint,
-                        hintLabel: hintLabel ?? "",
-                        hintText: selectedVerboseHint ?? AnyView(
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(
-                                    "Current CGM Models Supported:"
-                                )
-                                VStack(alignment: .leading) {
-                                    ForEach(DeviceCatalog.cgms.filter(\.isSelectableInPicker)) { cgm in
-                                        Text("• \(cgm.hintLine)")
-                                    }
+            }
+            .sheet(isPresented: $shouldDisplayHint1) {
+                SettingInputHintView(
+                    hintDetent: $hintDetent,
+                    shouldDisplayHint: $shouldDisplayHint1,
+                    hintLabel: "CGM Models",
+                    hintText: Text(
+                        "Current CGM Models Supported:\n\n" +
+                            "• Accu-Chek SmartGuide\n" +
+                            "• Dexcom G5\n" +
+                            "• Dexcom G6 / ONE\n" +
+                            "• Dexcom G7 / ONE+\n" +
+                            "• Dexcom Share\n" +
+                            "• Eversense E3/365\n" +
+                            "• Freestyle Libre\n" +
+                            "• Freestyle Libre Demo\n" +
+                            "• Glucose Simulator\n" +
+                            "• Nightscout\n" +
+                            "• xDrip4iOS\n\n" +
+                            "Note: The CGM Heartbeat can come from either a CGM or a pump to wake up Trio when phone is locked or in the background. If CGM is on the same phone as Trio and xDrip4iOS is configured to use the same AppGroup as Trio and the heartbeat feature is turned on in xDrip4iOS, then the CGM can provide a heartbeat to wake up Trio when phone is locked or app is in the background."
+                    ),
+                    sheetTitle: String(localized: "Help", comment: "Help sheet title")
+                )
+            }
+            .sheet(isPresented: $shouldDisplayHint2) {
+                SettingInputHintView(
+                    hintDetent: $hintDetent,
+                    shouldDisplayHint: $shouldDisplayHint2,
+                    hintLabel: "Smoothing Algorithms",
+                    hintText: Text(
+                        "Available smoothing algorithms:\n\n" +
+                            "• Second Order Exponential\n" +
+                            "• Tsunami Unscented Kalman Filter\n" +
+                            "• Adaptive UKF Smoothing\n\n" +
+                            "Default: Exponential\n\n" +
+                            "Second-Order Exponential Smoothing\n\n" +
+                            "Benefit: provides a simple, fast filter that smooths CGM values and captures approximately linear trends with minimal computation.\n\n" +
+                            "Second-order exponential smoothing (Holt's linear method) tracks both the level and the trend of a time series with two recursive updates.\n\n" +
+                            "Unscented Kalman Filter (UKF)\n\n" +
+                            "Benefit: adapts automatically to changing sensor quality and outliers while preserving real glucose dynamics with less lag.\n\n" +
+                            "The UKF maintains a state vector xₜ = [Gₜ, Ġₜ]ᵀ (glucose Gₜ and its rate of change Ġₜ) and a covariance matrix Pₜ that represent both the estimate and its uncertainty.\n\n" +
+                            "Each step predicts the state with a nonlinear process model, then fuses the new CGM value zₜ using a measurement-noise term Rₜ and the innovation νₜ = zₜ − ẑₜ.\n\n" +
+                            "In the Tsunami adaptation, Rₜ is learned online from recent νₜ values using dual-rate updates (fast and slow), and suspicious points are handled softly by inflating an effective Rₑ instead of discarding them.\n\n" +
+                            "A Rauch–Tung–Striebel (RTS) smoother then runs backward over each segment, using a smoothing gain Cₜ = Pₜ · Fₜᵀ · (P̂ₜ)⁻¹ to reduce lag and sharpen the final smoothed glucose curve.\n\n" +
+                            "Adaptive UKF Smoothing\n\n" +
+                            "Benefit: the newest generation of the UKF (AAPS Boost variant), with a statistically corrected noise estimator, faster trend detection, and protection against sensor-compression lows.\n\n" +
+                            "It uses the same [Gₜ, Ġₜ] state model as the UKF, but learns Rₜ by subtracting the predicted variance from the innovation statistics, ramps outlier down-weighting in gently from 2σ (Huber-style), and detects genuine fast moves with a 2-of-3 same-sign gate so it accelerates onto real trends sooner.\n\n" +
+                            "A steep drop below 75 mg/dL with little insulin on board is treated as a probable sensor-compression low and heavily down-weighted for at most 3 readings — a real, insulin-driven low always passes through."
+                    ),
+                    sheetTitle: String(localized: "Help", comment: "Help sheet title")
+                )
+            }
+            .sheet(isPresented: $shouldDisplayHint) {
+                SettingInputHintView(
+                    hintDetent: $hintDetent,
+                    shouldDisplayHint: $shouldDisplayHint,
+                    hintLabel: hintLabel ?? "",
+                    hintText: selectedVerboseHint ?? AnyView(
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(
+                                "Current CGM Models Supported:"
+                            )
+                            VStack(alignment: .leading) {
+                                ForEach(DeviceCatalog.cgms.filter(\.isSelectableInPicker)) { cgm in
+                                    Text("• \(cgm.hintLine)")
                                 }
-                                Text(
-                                    "Note: The CGM Heartbeat can come from either a CGM or a pump to wake up Trio when phone is locked or in the background. If CGM is on the same phone as Trio and xDrip4iOS is configured to use the same AppGroup as Trio and the heartbeat feature is turned on in xDrip4iOS, then the CGM can provide a heartbeat to wake up Trio when phone is locked or app is in the background."
-                                )
                             }
-                        ),
-                        sheetTitle: String(localized: "Help", comment: "Help sheet title")
-                    )
+                            Text(
+                                "Note: The CGM Heartbeat can come from either a CGM or a pump to wake up Trio when phone is locked or in the background. If CGM is on the same phone as Trio and xDrip4iOS is configured to use the same AppGroup as Trio and the heartbeat feature is turned on in xDrip4iOS, then the CGM can provide a heartbeat to wake up Trio when phone is locked or app is in the background."
+                            )
+                        }
+                    ),
+                    sheetTitle: String(localized: "Help", comment: "Help sheet title")
+                )
+            }
+            // Selection is applied in onDismiss so the setup sheet is presented only once the picker is gone.
+            .sheet(isPresented: $showCGMSelection, onDismiss: {
+                if let entry = pendingCGM {
+                    pendingCGM = nil
+                    state.addCGM(cgm: CGMModel(entry))
                 }
-                // Selection is applied in onDismiss so the setup sheet is presented only once the picker is gone.
-                .sheet(isPresented: $showCGMSelection, onDismiss: {
-                    if let entry = pendingCGM {
-                        pendingCGM = nil
-                        state.addCGM(cgm: CGMModel(entry))
-                    }
-                }) {
-                    DevicePickerView(
-                        title: String(localized: "Add CGM", comment: "The title of the CGM chooser in settings"),
-                        entries: DeviceCatalog.cgms
-                    ) { entry in
-                        pendingCGM = entry
-                        showCGMSelection = false
-                    }
+            }) {
+                DevicePickerView(
+                    title: String(localized: "Add CGM", comment: "The title of the CGM chooser in settings"),
+                    entries: DeviceCatalog.cgms
+                ) { entry in
+                    pendingCGM = entry
+                    showCGMSelection = false
                 }
-                .confirmationDialog("Smoothing Algorithm Changed", isPresented: $shouldShowSmoothingAlgorithmChangeDialog) {
-                    Button("Resume Smoothing") {
-                        state.smoothGlucose = true
-                    }
-                } message: {
-                    Text(
-                        "Smoothing has been disabled to clear old smoothed values. Toggle smoothing back on to apply the new algorithm to all glucose readings."
-                    )
+            }
+            .confirmationDialog("Smoothing Algorithm Changed", isPresented: $shouldShowSmoothingAlgorithmChangeDialog) {
+                Button("Resume Smoothing") {
+                    state.smoothGlucose = true
                 }
+            } message: {
+                Text(
+                    "Smoothing has been disabled to clear old smoothed values. Toggle smoothing back on to apply the new algorithm to all glucose readings."
+                )
             }
         }
     }

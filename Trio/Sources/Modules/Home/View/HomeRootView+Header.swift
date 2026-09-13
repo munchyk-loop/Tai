@@ -93,6 +93,16 @@ extension Home.RootView {
                 state.shouldDisplayCGMSetupSheet.toggle()
             }
         }
+        .accessibilityAction {
+            if !state.cgmAvailable {
+                showCGMSelection.toggle()
+            } else {
+                state.shouldDisplayCGMSetupSheet.toggle()
+            }
+        }
+        .accessibilityAction(named: Text("Snooze alerts")) {
+            showSnoozeSheet = true
+        }
     }
 
     @ViewBuilder func rightHeaderPanel() -> some View {
@@ -122,6 +132,12 @@ extension Home.RootView {
                     Text(state.units == .mgdL ? eventualGlucose.description : eventualGlucose.formattedAsMmolL)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("Eventual glucose"))
+                .accessibilityValue(Text(
+                    (state.units == .mgdL ? eventualGlucose.description : eventualGlucose.formattedAsMmolL)
+                        + " " + state.units.spokenValue
+                ))
             } else {
                 HStack {
                     Text("⇢")
@@ -130,6 +146,9 @@ extension Home.RootView {
                     Text("--")
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("Eventual glucose"))
+                .accessibilityValue(Text(verbatim: "--"))
             }
             /// Loop view at bottomLeading
             LoopView(
@@ -143,6 +162,9 @@ extension Home.RootView {
             .onTapGesture {
                 state.isStatusPopupPresented.toggle()
             }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint(Text(String(localized: "Opens loop status", comment: "Accessibility hint")))
+            .accessibilityAction { state.isStatusPopupPresented.toggle() }
         }
     }
 
@@ -209,6 +231,15 @@ extension Home.RootView {
                 .font(.callout).fontWeight(.bold).fontDesign(.rounded)
 //                    InsulinConcentrationBadge(concentration: 1)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Insulin on board"))
+            .accessibilityValue(Text(
+                (
+                    Formatter.decimalFormatterWithTwoFractionDigits
+                        .string(from: state.currentIOB as NSNumber) ?? "0"
+                )
+                    + String(localized: " U", comment: "Insulin unit")
+            ))
             HStack {
                 Image("premeal")
                     .renderingMode(.template)
@@ -226,6 +257,13 @@ extension Home.RootView {
                 )
                 .font(.callout).fontWeight(.bold).fontDesign(.rounded)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Carbs on board"))
+            .accessibilityValue(Text(
+                (Formatter.decimalFormatterWithTwoFractionDigits.string(
+                    from: NSNumber(value: state.enactedAndNonEnactedDeterminations.first?.cob ?? 0)
+                ) ?? "0") + String(localized: " g", comment: "gram of carbs")
+            ))
             HStack {
                 /// Only display the insulin delivery rate info if the pump is not
                 /// suspended and is available (e.g., pod is paired & not faulted).

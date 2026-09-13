@@ -23,6 +23,21 @@ extension Home.RootView {
                 state.shouldDisplayPumpSetupSheet.toggle()
             }
         }
+        // group reservoir/battery/pod into one button so VO reads it as a single control
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(Text(
+            state.pumpDisplayState == nil
+                ? String(localized: "Opens pump setup", comment: "Accessibility hint")
+                : String(localized: "Opens pump settings", comment: "Accessibility hint")
+        ))
+        .accessibilityAction {
+            if state.pumpDisplayState == nil {
+                showPumpSelection.toggle()
+            } else {
+                state.shouldDisplayPumpSetupSheet.toggle()
+            }
+        }
     }
 
     var horizontalPumpView: some View {

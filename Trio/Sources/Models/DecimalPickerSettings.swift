@@ -122,6 +122,11 @@ class PickerSettingsProvider: ObservableObject, Injectable {
 }
 
 struct DecimalPickerSettings {
+    static let overridePercentageMin: Decimal = 40
+    static let overridePercentageMax: Decimal = 200
+    static let tempTargetGlucoseMin: Decimal = 80
+    static let tempTargetGlucoseMax: Decimal = 200
+
     var carbsRequiredThreshold = PickerSetting(value: 10, step: 1, min: 0, max: 100, type: PickerSetting.PickerSettingType.gram)
     var individualAdjustmentFactor = PickerSetting(
         value: 0.5,

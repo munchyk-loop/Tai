@@ -12,15 +12,24 @@ enum TempBasalFunctionError: LocalizedError, Equatable {
 }
 
 enum TempBasalFunctions {
-    /// Rounds a basal rate down to the nearest rate the paired pump can deliver, mirroring
-    /// `PumpManager.roundToSupportedBasalRate`, which is applied again at enactment.
+    /// Rounds a basal rate to the nearest rate the paired pump can deliver.
+    ///
+    /// Nearest, not floored as `PumpManager.roundToSupportedBasalRate` does: on a uniform grid it
+    /// reproduces JS `round-basal.js`, which rounds half up. Zero seeds the search because every
+    /// pump can hold a zero temp, and a pod's table starts at 0.05 without listing one.
     static func roundBasal(profile: Profile, basalRate: Decimal) -> Decimal {
-        // no pump paired: leave the rate alone beyond keeping reason strings readable
+        // No pump paired: leave the rate alone beyond keeping reason strings readable. Keep five
+        // decimal places because a concentrated-insulin rate can carry two digits beyond a U100
+        // pump rate.
         guard !profile.supportedBasalRates.isEmpty else {
-            return basalRate.rounded(scale: 3, roundingMode: .down)
+            return basalRate.rounded(scale: 5, roundingMode: .down)
         }
 
-        return profile.supportedBasalRates.lazy.filter { $0 <= basalRate }.max() ?? 0
+        return profile.supportedBasalRates.reduce(0) { nearest, rate in
+            let distance = abs(rate - basalRate)
+            let nearestDistance = abs(nearest - basalRate)
+            return distance < nearestDistance || (distance == nearestDistance && rate > nearest) ? rate : nearest
+        }
     }
 
     /// defines the max safe basal rate given a profile

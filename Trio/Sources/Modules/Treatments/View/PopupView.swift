@@ -131,26 +131,34 @@ struct PopupView: View {
                 // List of calculation cards organized in sections.
                 // Each section represents a component of the final calculation.
                 List {
+                    // Each formula card reads as one grouped element rather than
+                    // dozens of separate grid cells; the section header gives context.
                     Section("Glucose Calculation") {
                         glucoseCardContent.listRowStyle()
+                            .accessibilityElement(children: .combine)
                     }
                     Section("Insulin On Board (IOB)") {
                         iobCardContent.listRowStyle()
+                            .accessibilityElement(children: .combine)
                     }
                     Section("Carbs On Board (COB)") {
                         cobCardContent.listRowStyle()
+                            .accessibilityElement(children: .combine)
                     }
                     Section("Glucose Trend (15 min)") {
                         deltaCardContent.listRowStyle()
+                            .accessibilityElement(children: .combine)
                     }
                     Section("Full Bolus") {
                         fullBolusCardContent.listRowStyle()
+                            .accessibilityElement(children: .combine)
                     }
 
                     // Conditional sections based on user's selection of the "Super Bolus" option.
                     if state.useSuperBolus {
                         Section("Super Bolus") {
                             superBolusCardContent.listRowStyle()
+                                .accessibilityElement(children: .combine)
                         }
                     }
 
@@ -159,6 +167,7 @@ struct PopupView: View {
                     if state.factoredInsulin > 0 {
                         Section("Applied Factors") {
                             factorsCardContent.listRowStyle()
+                                .accessibilityElement(children: .combine)
                         }
                     }
                 }
@@ -926,6 +935,13 @@ struct PopupView: View {
             }
             .glassPanel(tint: .accentColor, tintOpacity: 0.10, strokeOpacity: 0.25)
             .fixedSize(horizontal: false, vertical: true)
+            // read the final dose as one element with a spoken unit
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Recommended Bolus"))
+            .accessibilityValue(Text(
+                "\(insulinFormatter(state.insulinCalculated, .down, true)) "
+                    + String(localized: "units", comment: "Insulin units, spoken")
+            ))
         }
     }
 

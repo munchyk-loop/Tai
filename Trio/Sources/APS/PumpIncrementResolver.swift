@@ -19,8 +19,8 @@ enum PumpIncrementResolver {
         currentIncrement: Decimal,
         concentration: Decimal
     ) -> Decimal {
-        let supportedPumpIncrement = Decimal(supportedBolusVolumes.first ?? 0.1)
-        var bolusIncrement = Decimal(supportedBolusVolumes.first ?? Double(currentIncrement))
+        let supportedPumpIncrement = Decimal(supportedBolusVolumes.first ?? 0.1).rounded(scale: 3)
+        var bolusIncrement = Decimal(supportedBolusVolumes.first ?? Double(currentIncrement)).rounded(scale: 3)
 
         if concentration != 1 {
             bolusIncrement = supportedPumpIncrement * concentration
@@ -39,7 +39,7 @@ enum PumpIncrementResolver {
     /// - Parameter supportedBasalRates: `PumpManager.supportedBasalRates`, which starts at 0 on
     ///   pumps that allow a zero scheduled rate, so the first positive entry is the step.
     static func resolveBasal(supportedBasalRates: [Double], concentration: Decimal) -> Decimal {
-        let step = supportedBasalRates.first(where: { $0 > 0 }).map { Decimal($0) } ?? basalFallback
+        let step = supportedBasalRates.first(where: { $0 > 0 }).map { Decimal($0).rounded(scale: 3) } ?? basalFallback
         return step * concentration
     }
 }

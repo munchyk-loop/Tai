@@ -396,7 +396,7 @@ final class BaseAPSManager: APSManager, Injectable {
             "Concentration: Bolus \(roundedVolume) U adjusted to U\(Int(settings.insulinConcentration * 100))-Volume of \(convertedVolume)"
         )
 
-        return Double(truncating: convertedVolume as NSNumber)
+        return convertedVolume.nearestDouble
     }
 
     private func adjustPumpedRateToConcentration(_ rate: Double) -> Double {
@@ -410,7 +410,7 @@ final class BaseAPSManager: APSManager, Injectable {
             "Concentration: Rate \(roundedRate) IU/hr adjusted to U\(Int(settings.insulinConcentration * 100))-Rate of \(convertedRate)"
         )
 
-        return Double(truncating: convertedRate as NSNumber)
+        return convertedRate.nearestDouble
     }
 
     private func adjustPumpedRateToU100(_ rate: Decimal) -> Decimal {
@@ -630,11 +630,12 @@ final class BaseAPSManager: APSManager, Injectable {
         }
     }
 
-    /// The paired pump's deliverable basal rates, for the algorithm to round against.
-    /// Rounded to 3 dp because the kits build their tables as `Double(n) / 20` and similar, and the
-    /// resulting binary error would push an entry just above the clean rate it is meant to match.
+    /// The paired pump's deliverable basal rates, for the algorithm to round against, in U100
+    /// units. Normalize before scaling so conversion back to pump units lands on the pump's own
+    /// table exactly.
     private var supportedBasalRates: [Decimal] {
-        (pumpManager?.supportedBasalRates ?? []).map { Decimal($0).rounded(scale: 3) }
+        let concentration = settings.insulinConcentration
+        return (pumpManager?.supportedBasalRates ?? []).map { Decimal($0).rounded(scale: 3) * concentration }
     }
 
     func roundBolus(amount: Decimal) -> Decimal {
@@ -671,7 +672,9 @@ final class BaseAPSManager: APSManager, Injectable {
             return
         }
 
-        let roundedAmount = pump.roundToSupportedBolusVolume(units: adjustPumpedVolumeToConcentration(amount))
+        let roundedAmount = pump.roundToSupportedBolusVolume(
+            units: adjustPumpedVolumeToConcentration(amount).deliverable
+        )
 
         debug(.apsManager, "Enact bolus \(roundedAmount), manual \(!isSMB)")
 
@@ -765,7 +768,7 @@ final class BaseAPSManager: APSManager, Injectable {
         debug(.apsManager, "Enact temp basal \(safeRate) - \(duration)")
 
         let adjustedRate = adjustPumpedRateToConcentration(safeRate)
-        let roundedRate = pump.roundToSupportedBasalRate(unitsPerHour: adjustedRate)
+        let roundedRate = pump.roundToSupportedBasalRate(unitsPerHour: adjustedRate.deliverable)
 
         do {
             try await pump.enactTempBasal(unitsPerHour: roundedRate, for: duration)
@@ -849,14 +852,18 @@ final class BaseAPSManager: APSManager, Injectable {
         if let rate = rateDecimal, let duration = durationInSeconds {
             let requestedRate = rate.doubleValue
             let adjustedRate = requestedRate > 0 ? pump
-                .roundToSupportedBasalRate(unitsPerHour: adjustPumpedRateToConcentration(requestedRate)) : requestedRate
+                .roundToSupportedBasalRate(
+                    unitsPerHour: adjustPumpedRateToConcentration(requestedRate).deliverable
+                ) : requestedRate
             try await performBasal(pump: pump, rate: NSDecimalNumber(value: adjustedRate), duration: duration)
         }
 
         // only perform a bolus if smbToDeliver is > 0
         if let smb = smbToDeliver, smb.compare(NSDecimalNumber(value: 0)) == .orderedDescending {
             let smbAmount = Double(truncating: smb)
-            let adjustedSMBAmount = pump.roundToSupportedBolusVolume(units: adjustPumpedVolumeToConcentration(smbAmount))
+            let adjustedSMBAmount = pump.roundToSupportedBolusVolume(
+                units: adjustPumpedVolumeToConcentration(smbAmount).deliverable
+            )
             let finalSMBAmount = NSDecimalNumber(value: adjustedSMBAmount) // Convert to NSDecimalNumber
             try await performBolus(pump: pump, smbToDeliver: finalSMBAmount)
         }

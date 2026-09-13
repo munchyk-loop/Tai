@@ -52,6 +52,7 @@ struct AddOverrideForm: View {
                         },
                         label: {
                             Image(systemName: "questionmark.circle")
+                                .accessibilityLabel(Text("Help"))
                         }
                     )
                 }
@@ -113,7 +114,14 @@ struct AddOverrideForm: View {
                                 set: { state.overridePercentage = Double($0) }
                             ), label: Text("")
                         ) {
-                            ForEach(Array(stride(from: 40, through: 150, by: percentageStep)), id: \.self) { percent in
+                            ForEach(
+                                Array(stride(
+                                    from: Int(DecimalPickerSettings.overridePercentageMin),
+                                    through: Int(DecimalPickerSettings.overridePercentageMax),
+                                    by: percentageStep
+                                )),
+                                id: \.self
+                            ) { percent in
                                 Text("\(percent) %").tag(percent)
                             }
                         }

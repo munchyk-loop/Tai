@@ -339,6 +339,8 @@ struct TotalDailyDoseChart: View {
             )
             .chartXVisibleDomain(length: StatChartUtils.visibleDomainLength(for: selectedInterval))
             .frame(height: 250)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Total daily dose bar chart"))
             if let windowSize = movingAverageWindowSize {
                 HStack {
                     GeometryReader { geometry in

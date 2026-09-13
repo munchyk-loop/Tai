@@ -177,6 +177,9 @@ struct StatChartUtils {
                 .foregroundStyle(Color.secondary)
             Text(value)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(value))
     }
 
     /// Computes the median value of an array of integers.
@@ -218,6 +221,7 @@ struct StatChartUtils {
     @ViewBuilder static func legendItem(label: String, color: Color) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "circle.fill").foregroundStyle(color)
+                .accessibilityHidden(true)
             Text(label).foregroundStyle(Color.secondary)
         }.font(.caption)
     }

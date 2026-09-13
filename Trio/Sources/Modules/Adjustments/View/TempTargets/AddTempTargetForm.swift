@@ -55,6 +55,7 @@ struct AddTempTargetForm: View {
                         },
                         label: {
                             Image(systemName: "questionmark.circle")
+                                .accessibilityLabel(Text("Help"))
                         }
                     )
                 }
@@ -82,7 +83,13 @@ struct AddTempTargetForm: View {
 
             Section {
                 let settingsProvider = PickerSettingsProvider.shared
-                let glucoseSetting = PickerSetting(value: 0, step: targetStep, min: 80, max: 200, type: .glucose)
+                let glucoseSetting = PickerSetting(
+                    value: 0,
+                    step: targetStep,
+                    min: DecimalPickerSettings.tempTargetGlucoseMin,
+                    max: DecimalPickerSettings.tempTargetGlucoseMax,
+                    type: .glucose
+                )
                 TargetPicker(
                     label: String(
                         localized: "Target Glucose",

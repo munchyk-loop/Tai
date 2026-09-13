@@ -18,7 +18,7 @@ extension BasalProfileEditor {
             // from this list.
             deviceManager.pumpManager?.supportedBasalRates
                 .filter { $0 > 0 }
-                .map { Decimal($0) }
+                .map { Decimal($0).rounded(scale: 3) }
         }
 
         func saveProfile(_ profile: [BasalProfileEntry]) -> AnyPublisher<Void, Error> {
