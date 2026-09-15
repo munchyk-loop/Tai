@@ -335,8 +335,8 @@ enum SettingItems {
                 "Max Fat": "Enable Fat and Protein Entries",
                 "Max Protein": "Enable Fat and Protein Entries",
                 "Fat and Protein Delay": "Enable Fat and Protein Entries",
-                "Spread Interval": "Enable Fat and Protein Entries",
-                "Fat and Protein Percentage": "Enable Fat and Protein Entries",
+                "Spread Interval (minutes)": "Enable Fat and Protein Entries",
+                "Fat and Protein Factor": "Enable Fat and Protein Entries",
                 "FPU": "Enable Fat and Protein Entries"
             ],
             path: ["Features", "Treatments", "Meal Settings"]
