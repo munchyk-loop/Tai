@@ -48,6 +48,10 @@ extension Home {
         @State var pullOffset: CGFloat = 0
         @State var isRefreshArmed = false
         @State var isForcingLoop = false
+        /// Date under the finger while the chart is scrubbed, else nil. Owned here (not inside
+        /// `MainChartView`) purely because it is a `@Binding`; the selection card itself still
+        /// renders inside the chart's own overlay, not in a separate zone.
+        @State var chartSelection: Date? = nil
 
         @FetchRequest(fetchRequest: OverrideStored.fetch(
             NSPredicate.lastActiveOverride,
@@ -86,7 +90,8 @@ extension Home {
                     displayYgridLines: state.displayYgridLines,
                     thresholdLines: state.thresholdLines,
                     state: state,
-                    showCobIobChart: state.showCobIobChart
+                    showCobIobChart: state.showCobIobChart,
+                    selection: $chartSelection
                 )
             }
             .overlay(alignment: .bottomTrailing) {
@@ -607,7 +612,7 @@ extension Home {
                         " " + dateFormatter.string(from: determination?.deliverAt ?? Date())
 
                     // Add warning if the loop is not closed or if it's a manual temp basal
-                    if state.manualTempBasal || !state.closedLoop {
+                    if state.manualTempBasal || state.dosingMode.automation == .off {
                         title += String(
                             localized: " - not enacted!",
                             comment: "Suffix appended to Home status popup title when the suggestion was not enacted"
@@ -669,6 +674,18 @@ extension Home {
                     Text("No Algorithm result").font(.body).foregroundColor(.primary)
                 }
 
+                if state.dosingMode.automation == .off {
+                    Button {
+                        state.isStatusPopupPresented = false
+                        state.showModal(for: .manualTempBasal)
+                    } label: {
+                        Text("Manual Temp Basal")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    .buttonStyle(.bordered)
+                    .padding(.top)
+                }
+
                 Button {
                     state.isStatusPopupPresented = false
                 } label: {
@@ -702,7 +719,7 @@ extension Home {
                     " " + dateFormatter.string(from: determination?.deliverAt ?? Date())
 
                 // Add warning if the loop is not closed or if it's a manual temp basal
-                if state.manualTempBasal || !state.closedLoop {
+                if state.manualTempBasal || state.dosingMode.automation == .off {
                     statusTitlePopup += String(
                         localized: " - not enacted!",
                         comment: "Suffix appended to Home status popup title when the suggestion was not enacted"

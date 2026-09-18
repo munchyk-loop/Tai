@@ -41,8 +41,9 @@ struct MainChartView: View {
 
     @Environment(\.colorScheme) var colorScheme
 
-    /// Date under the user's finger while inspecting (transient popover), else nil.
-    @State var selection: Date? = nil
+    /// Date under the finger while inspecting, else nil. Owned by Home, which draws the
+    /// readout in the meal slot; the chart only writes it.
+    @Binding var selection: Date?
 
     @State var mainChartHasInitialized = false
 
@@ -394,10 +395,8 @@ extension MainChartView {
         }
     }
 
-    /// Vertical indicator + point highlights + detail card for the current selection.
-    /// Positions are computed with the same linear maps the canvas charts use, and the
-    /// card sits in a fixed slot at the top of the glucose pane, inside the viewport —
-    /// so it can never be clipped.
+    /// Vertical indicator + point highlights for the selection, positioned with the same
+    /// linear maps the canvas uses. The readout itself is Home's (`ChartSelectionRow`).
     @ViewBuilder private var selectionOverlay: some View {
         if let selectedGlucose, let selectionDate = selectedGlucose.date {
             let x = xPosition(for: selectionDate)
@@ -454,10 +453,9 @@ extension MainChartView {
                 // Detail card: fixed slot at the top of the glucose pane.
                 VStack(spacing: 0) {
                     Color.clear.frame(height: basalHeight + 4)
-                    SelectionPopoverView(
+                    ChartSelectionRow(
                         selectedGlucose: selectedGlucose,
-                        selectedIOBValue: selectedIOBValue,
-                        selectedCOBValue: selectedCOBValue,
+                        determination: selectedIOBValue,
                         units: units,
                         highGlucose: highGlucose,
                         lowGlucose: lowGlucose,
@@ -687,10 +685,9 @@ extension MainChartView {
         }
     }
 
-    /// Snaps a viewport x position to the 5-minute glucose cadence and updates the
-    /// selection, skipping no-op writes. The popover lookup window is +/-150 s, so the
-    /// 300 s snap lands exactly on the nearest reading; it also means finger jitter or a
-    /// scrub only produces a new value when actually crossing to another reading.
+    /// Snaps a viewport x to the 5-minute glucose cadence and updates the selection, skipping
+    /// no-op writes: against the +/-150 s lookup window the 300 s snap lands on exactly one
+    /// reading, so jitter yields a new value only when crossing to another one.
     private func updateSelection(atViewportX x: CGFloat, withPointHaptic: Bool = true) {
         let raw = date(atViewportX: x)
         let quantum: TimeInterval = 300
@@ -922,7 +919,7 @@ struct MainChartCanvas: View {
     var showCobIobChart: Bool
 
     @State var basalProfiles: [BasalProfile] = []
-    @State var preparedTempBasals: [(start: Date, end: Date, rate: Double)] = []
+    @State var preparedTempBasals: [(start: Date, end: Date, rate: Double, isScheduled: Bool)] = []
 
     // Computed (not stored) on purpose: stored properties participate in SwiftUI's
     // change detection, and a stored reference initialized per-init could mark this view
@@ -1010,7 +1007,7 @@ struct CobIobPlotFrameKey: PreferenceKey {
     }
 }
 
-// MARK: - Main (glucose) chart pane with selection popover
+// MARK: - Main (glucose) chart pane
 
 extension MainChartCanvas {
     var mainChart: some View {

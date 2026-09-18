@@ -3,6 +3,12 @@ import UIKit
 import UserNotifications
 
 class AppDelegate: NSObject, UIApplicationDelegate, ObservableObject, UNUserNotificationCenterDelegate {
+    /// Assigned by `TrioApp.loadServices()` once the Core Data stack is up.
+    /// Resolving `TelemetryClient` constructs the APS/device graph, whose first
+    /// pump/CGM save crashes if the persistent stores are not loaded yet — so
+    /// this delegate never resolves it, and pre-init foreground transitions no-op.
+    var telemetry: TelemetryClient?
+
     func application(
         _: UIApplication,
         didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?
@@ -13,19 +19,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, ObservableObject, UNUserNoti
         let crashReportingEnabled: Bool = PropertyPersistentFlags.shared.crashlyticsSharingEnabled ?? true
         CrashReportingGate.configureAtLaunch(enabled: crashReportingEnabled)
 
-        // Telemetry: record this cold launch into the sliding 7-day window. If
-        // consent is set and the build SHA changed since the last successful
-        // send, fire an immediate ping — the 24h scheduler can't notice a
-        // build update on its own. Then arm the recurring 24h timer.
-        TelemetryClient.shared.recordColdLaunch()
-        Task.detached {
-            if TelemetryClient.shared.buildShaChangedSinceLastSend() {
-                await TelemetryClient.shared.maybeSend()
-            }
-            TelemetryClient.shared.scheduleRecurring()
-        }
-
         return true
+    }
+
+    /// Foreground-transition entry point for telemetry cadence. Re-evaluates
+    /// the overdue window every time the user brings Trio to the foreground,
+    /// since `scheduleRecurring`'s GCD timer doesn't fire while suspended.
+    /// No-op if a send already landed within the last 24h.
+    func applicationWillEnterForeground(_: UIApplication) {
+        telemetry?.checkAndSendIfOverdue(reason: .foreground)
     }
 
     func application(

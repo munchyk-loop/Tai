@@ -14,6 +14,9 @@ protocol APSManager {
     /// they want feedback even if the underlying error is "transient".
     func markNextLoopUserInitiated()
     func enactBolus(amount: Double, isSMB: Bool, callback: ((Bool, String) -> Void)?) async
+    /// User-driven temp basal outside the algorithm loop. `rate: 0, duration: 0` cancels a
+    /// running one, per the `PumpManager.enactTempBasal` convention.
+    func enactManualTempBasal(rate: Double, duration: TimeInterval) async
     var pumpManager: PumpManagerUI? { get set }
     var bluetoothManager: BluetoothStateManager? { get }
     var pumpDisplayState: CurrentValueSubject<PumpDisplayState?, Never> { get }
@@ -27,7 +30,6 @@ protocol APSManager {
     var isManualTempBasal: Bool { get }
     var isScheduledBasal: Bool? { get }
     var isSuspended: Bool { get }
-    func enactTempBasal(rate: Double, duration: TimeInterval) async
     func determineBasal() async throws
     /// Runs a determination outside the loop, after a treatment or adjustment changed what the
     /// algorithm reads. Waits for a loop in flight to finish first, since that loop determined
@@ -136,6 +138,7 @@ final class BaseAPSManager: APSManager, Injectable {
     @Injected() private var broadcaster: Broadcaster!
     @Injected() private var trioAlertManager: TrioAlertManager!
     @Persisted(key: "lastLoopStartDate") private var lastLoopStartDate: Date = .distantPast
+    private var lastDosingMode: DosingMode?
     @Persisted(key: "lastLoopDate") var lastLoopDate: Date = .distantPast {
         didSet {
             lastLoopDateSubject.send(lastLoopDate)
@@ -202,6 +205,8 @@ final class BaseAPSManager: APSManager, Injectable {
     init(resolver: Resolver) {
         injectServices(resolver)
         openAPS = OpenAPS(storage: storage, tddStorage: tddStorage, glucoseStorage: glucoseStorage, carbsStorage: carbsStorage)
+        lastDosingMode = settingsManager.settings.dosingMode
+        broadcaster.register(SettingsObserver.self, observer: self)
         subscribe()
         lastLoopDateSubject.send(lastLoopDate)
 
@@ -216,7 +221,7 @@ final class BaseAPSManager: APSManager, Injectable {
             if wasParsed {
                 Task {
                     do {
-                        try await openAPS.createProfiles()
+                        try await openAPS.createProfiles(for: self.settingsManager.settings.dosingMode)
                     } catch {
                         debug(
                             .apsManager,
@@ -377,7 +382,7 @@ final class BaseAPSManager: APSManager, Injectable {
         try await determineBasal()
 
         // Closed loop: also enact the determination.
-        if settings.closedLoop {
+        if settings.dosingMode.automation != .off {
             try await enactDetermination()
         }
 
@@ -476,7 +481,7 @@ final class BaseAPSManager: APSManager, Injectable {
 
         loopStats(loopStatRecord: loopStatRecord)
 
-        if settings.closedLoop {
+        if settings.dosingMode.automation != .off {
             await reportEnacted(wasEnacted: error == nil)
         }
     }
@@ -520,16 +525,12 @@ final class BaseAPSManager: APSManager, Injectable {
     private func calculateAndStoreTDD() async throws {
         guard let pumpManager else { return }
 
-        async let pumpHistory = pumpHistoryStorage.getPumpHistory()
-        async let basalProfile = storage
-            .retrieveAsync(OpenAPS.Settings.basalProfile, as: [BasalProfileEntry].self) ??
-            [BasalProfileEntry](from: OpenAPS.defaults(for: OpenAPS.Settings.basalProfile)) ??
-            [] // OpenAPS.defaults ensures we at least get default rate of 1u/hr for 24 hrs
+        let basalProfile = storage.retrieve(OpenAPS.Settings.basalProfile, as: [BasalProfileEntry].self) ?? []
 
-        // Calculate TDD
+        // Calculate TDD; uncovered gaps are inferred from the basal profile in memory
         let tddResult = try await tddStorage.calculateTDD(
             pumpManager: pumpManager,
-            pumpHistory: pumpHistory,
+            pumpHistory: pumpHistoryStorage.getPumpHistory(),
             basalProfile: basalProfile
         )
 
@@ -587,11 +588,12 @@ final class BaseAPSManager: APSManager, Injectable {
             let now = Date()
 
             // put profile creation up front since autosens needs it
-            try await openAPS.createProfiles()
+            try await openAPS.createProfiles(for: settingsManager.settings.dosingMode)
             let currentTemp = try await fetchCurrentTempBasal(date: now)
             _ = try await autosense()
 
             let determination = try await openAPS.determineBasal(
+                for: settingsManager.settings.dosingMode,
                 currentTemp: currentTemp,
                 supportedBasalRates: supportedBasalRates,
                 shouldSmoothGlucose: settingsManager.settings.smoothGlucose,
@@ -651,6 +653,7 @@ final class BaseAPSManager: APSManager, Injectable {
         do {
             let temp = try await fetchCurrentTempBasal(date: Date.now)
             return try await openAPS.determineBasal(
+                for: settingsManager.settings.dosingMode,
                 currentTemp: temp,
                 supportedBasalRates: supportedBasalRates,
                 shouldSmoothGlucose: settingsManager.settings.smoothGlucose,
@@ -756,6 +759,36 @@ final class BaseAPSManager: APSManager, Injectable {
         }
     }
 
+    func enactManualTempBasal(rate: Double, duration: TimeInterval) async {
+        if let error = verifyStatus() {
+            processError(error)
+            return
+        }
+
+        guard let pump = pumpManager else { return }
+
+        // Unable to stack a new manual temp basal on top of one already running;
+        // the cancel call (rate 0, duration 0) always passes.
+        if isManualTempBasal, rate > 0, duration > 0 {
+            processError(APSError.manualBasalTemp(message: "Manual temp basal already running"))
+            return
+        }
+
+        let safeRate = min(rate, Double(settingsManager.pumpSettings.maxBasal))
+        let adjustedRate = adjustPumpedRateToConcentration(safeRate).deliverable
+        let roundedRate = pump.roundToSupportedBasalRate(unitsPerHour: adjustedRate)
+
+        debug(.apsManager, "Enact manual temp basal \(roundedRate) - \(duration)")
+
+        do {
+            try await pump.enactTempBasal(unitsPerHour: roundedRate, for: duration)
+            debug(.apsManager, "Manual temp basal succeeded")
+        } catch {
+            debug(.apsManager, "Manual temp basal failed with error: \(error)")
+            processError(APSError.pumpError(error))
+        }
+    }
+
     func cancelBolus(_ callback: ((Bool, String) -> Void)?) async {
         guard let pump = pumpManager, pump.status.pumpStatus.bolusing else { return }
         debug(.apsManager, "Cancel bolus")
@@ -780,42 +813,6 @@ final class BaseAPSManager: APSManager, Injectable {
             )
         }
         clearBolusReporter()
-    }
-
-    func checkMaxBasal(rate: Double) -> Double {
-        guard let pump = pumpManager else { return rate }
-        let maxBasal = Double(pump.roundToSupportedBolusVolume(units: Double(settingsManager.pumpSettings.maxBasal)))
-        return min(rate, maxBasal)
-    }
-
-    func enactTempBasal(rate: Double, duration: TimeInterval) async {
-        if let error = verifyStatus() {
-            processError(error)
-            return
-        }
-
-        guard let pump = pumpManager else { return }
-
-        // unable to do temp basal during manual temp basal 😁
-        if isManualTempBasal {
-            processError(APSError.manualBasalTemp(message: "Algorithm not enacted during manual TBR"))
-            return
-        }
-
-        let safeRate = checkMaxBasal(rate: rate)
-
-        debug(.apsManager, "Enact temp basal \(safeRate) - \(duration)")
-
-        let adjustedRate = adjustPumpedRateToConcentration(safeRate)
-        let roundedRate = pump.roundToSupportedBasalRate(unitsPerHour: adjustedRate.deliverable)
-
-        do {
-            try await pump.enactTempBasal(unitsPerHour: roundedRate, for: duration)
-            debug(.apsManager, "Temp Basal succeeded")
-        } catch {
-            debug(.apsManager, "Temp Basal failed with error: \(error)")
-            processError(APSError.pumpError(error))
-        }
     }
 
     private func fetchCurrentTempBasal(date: Date) async throws -> TempBasal {
@@ -1603,6 +1600,77 @@ private extension PumpManager {
                 }
             }
         }
+    }
+}
+
+extension BaseAPSManager: SettingsObserver {
+    func settingsDidChange(_ settings: TrioSettings) {
+        let previous = lastDosingMode
+        lastDosingMode = settings.dosingMode
+
+        // Only basal testing clears a running temp. Elsewhere it may be protecting against a low,
+        // and dropping back to scheduled basal would remove that protection.
+        guard settings.dosingMode == .basalTesting, previous != .basalTesting else { return }
+
+        Task { await cancelAutomaticTempBasal() }
+    }
+
+    /// Clears a Trio-set temp so a basal test starts from the scheduled rate.
+    private func cancelAutomaticTempBasal() async {
+        guard let pump = pumpManager else { return }
+
+        // A temp the user set on the pump is theirs to cancel.
+        guard !isManualTempBasal else { return }
+        guard case let .tempBasal(dose) = pump.status.basalDeliveryState, dose.automatic ?? true else { return }
+
+        do {
+            try await pump.enactTempBasal(unitsPerHour: 0, for: 0)
+            debug(.apsManager, "Cancelled temp basal for basal testing")
+        } catch {
+            debug(.apsManager, "Failed to cancel temp basal for basal testing: \(error)")
+            processError(APSError.pumpError(error))
+        }
+    }
+}
+
+extension BaseAPSManager: PumpManagerStatusObserver {
+    func pumpManager(_: PumpManager, didUpdate status: PumpManagerStatus, oldStatus _: PumpManagerStatus) {
+        let percent = Int((status.pumpBatteryChargeRemaining ?? 1) * 100)
+
+        let context = CoreDataStack.shared.newTaskContext()
+        context.name = "storeBatteryStatus"
+        context.perform {
+            /// only update the last item with the current battery infos instead of saving a new one each time
+            let fetchRequest: NSFetchRequest<OpenAPS_Battery> = OpenAPS_Battery.fetchRequest()
+            fetchRequest.sortDescriptors = [NSSortDescriptor(key: "date", ascending: false)]
+            fetchRequest.predicate = NSPredicate.predicateFor30MinAgo
+            fetchRequest.fetchLimit = 1
+
+            do {
+                let results = try context.fetch(fetchRequest)
+                let batteryToStore: OpenAPS_Battery
+
+                if let existingBattery = results.first {
+                    batteryToStore = existingBattery
+                } else {
+                    batteryToStore = OpenAPS_Battery(context: context)
+                    batteryToStore.id = UUID()
+                }
+
+                batteryToStore.date = Date()
+                batteryToStore.percent = Double(percent)
+                batteryToStore.voltage = nil
+                batteryToStore.status = percent > 10 ? "normal" : "low"
+                batteryToStore.display = status.pumpBatteryChargeRemaining != nil
+
+                guard context.hasChanges else { return }
+                try context.save()
+            } catch {
+                debug(.apsManager, "Failed to fetch or save battery: \(error)")
+            }
+        }
+        // TODO: - remove this after ensuring that NS still gets the same infos from Core Data
+        storage.save(status.pumpStatus, as: OpenAPS.Monitor.status)
     }
 }
 

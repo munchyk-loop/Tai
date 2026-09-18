@@ -19,6 +19,7 @@ enum MultiUsePanelState: Equatable {
     case maxIOBZero
     case adjustments(ActiveAdjustment)
     case whatsNew
+    case dosingModeLimited(DosingMode)
     case stats
 
     /// readings older than this offer manual glucose entry
@@ -34,12 +35,17 @@ enum MultiUsePanelState: Equatable {
         hasTempTarget: Bool,
         hasTempProfile: Bool,
         hasUnacknowledgedReleaseNotes: Bool,
+        dosingMode: DosingMode,
         now: Date
     ) -> MultiUsePanelState {
         if bolusInProgress { return .bolusProgress }
         if notificationsDisabled { return .notificationsDisabled }
         if pumpTimeMismatch { return .pumpTimeMismatch }
         if now.timeIntervalSince(lastGlucoseDate ?? .distantPast) > cgmStaleAfter { return .cgmStale }
+        // constrained modes clamp Max IOB to 0 without touching the stored value
+        if dosingMode.automation == .reductionsOnly || dosingMode.automation == .hypoSuspendOnly {
+            return .dosingModeLimited(dosingMode)
+        }
         if maxIOB <= 0 { return .maxIOBZero }
         if hasOverride, hasTempTarget { return .adjustments(.dual) }
         if hasOverride { return .adjustments(.override) }

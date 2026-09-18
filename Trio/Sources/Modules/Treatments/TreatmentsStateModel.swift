@@ -64,6 +64,16 @@ extension Treatments {
         var wholeCalc: Decimal = 0
         var factoredInsulin: Decimal = 0
         var insulinCalculated: Decimal = 0
+        var dosingMode: DosingMode = .open
+
+        /// What oref says is still needed on top of scheduled basal, discounted by the user's
+        /// Recommended Bolus Percentage and capped at Max Bolus. Never `smbToDeliver`, which oref
+        /// pairs with a compensating low temp that is not enacted here.
+        var algorithmSuggestedBolus: Decimal {
+            guard insulinRequired > 0 else { return 0 }
+            return min(insulinRequired * fraction, maxBolus)
+        }
+
         var fraction: Decimal = 0
         var basal: Decimal = 0
         var fattyMeals: Bool = false
@@ -346,6 +356,7 @@ extension Treatments {
             units = settingsManager.settings.units
             bolusIncrement = settingsManager.preferences.bolusIncrement
             fraction = settings.settings.overrideFactor
+            dosingMode = settings.settings.dosingMode
             fattyMeals = settings.settings.fattyMeals
             fattyMealFactor = settings.settings.fattyMealFactor
             sweetMeals = settings.settings.sweetMeals

@@ -66,6 +66,14 @@ struct CarbView: ChartContent {
                             .overlay(
                                 Circle().stroke(Color.primary, lineWidth: 0.4)
                             ) }
+
+                    // Xcode 27 annotation-shift fix (upstream #1492): attach the label to a
+                    // separate zero-size anchor mark instead of the visible symbol mark.
+                    PointMark(
+                        x: .value("Time", carbDate, unit: .second),
+                        y: .value("Value", yPosition)
+                    )
+                    .symbolSize(0)
                     .annotation(position: .bottom, spacing: 2) {
                         Text(Formatter.integerFormatter.string(from: carbAmount as NSNumber) ?? "")
                             .font(.caption2)
@@ -108,7 +116,7 @@ struct CarbView: ChartContent {
             x: .value("Time", date, unit: .second),
             y: .value("Value", yPosition)
         )
-        .symbol { Color.clear.frame(width: 0, height: 0) }
+        .symbolSize(0)
         .annotation(position: .bottom, alignment: .center, spacing: MainChartHelper.Config.carbBarSpacing) {
             VStack(spacing: MainChartHelper.Config.carbAnnotationSpacing) {
                 UpArrowBarShape()

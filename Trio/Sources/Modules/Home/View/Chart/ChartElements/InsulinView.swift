@@ -72,6 +72,14 @@ struct InsulinView: ChartContent {
                                     Circle().stroke(Color.primary, lineWidth: 0.4)
                                 )
                         }
+
+                        // Xcode 27 annotation-shift fix (upstream #1492): attach the label to a
+                        // separate zero-size anchor mark instead of the visible symbol mark.
+                        PointMark(
+                            x: .value("Time", bolusDate, unit: .second),
+                            y: .value("Value", yPosition)
+                        )
+                        .symbolSize(0)
                         .annotation(position: .top, spacing: 2) {
                             Text(label)
                                 .font(.caption2)
@@ -142,6 +150,14 @@ struct InsulinView: ChartContent {
                                     .foregroundStyle(Color.insulin)
                             }
                         }
+
+                        // Xcode 27 annotation-shift fix (upstream #1492): attach the label to a
+                        // separate zero-size anchor mark instead of the visible symbol mark.
+                        PointMark(
+                            x: .value("Time", bolusDate, unit: .second),
+                            y: .value("Value", yPosition)
+                        )
+                        .symbolSize(0)
                         .annotation(position: .top, spacing: 2) {
                             Text(label)
                                 .font(.caption2)
@@ -186,6 +202,14 @@ struct InsulinView: ChartContent {
                             .foregroundStyle(Color.purple)
                     }
                 }
+
+                // Xcode 27 annotation-shift fix (upstream #1492): attach the label to a
+                // separate zero-size anchor mark instead of the visible symbol mark.
+                PointMark(
+                    x: .value("Time", bolusDate, unit: .second),
+                    y: .value("Value", yPosition)
+                )
+                .symbolSize(0)
                 .annotation(position: .top, spacing: 2) {
                     Text(Formatter.bolusFormatterToIncrement(for: bolusIncrement).string(from: amount) ?? "")
                         .font(.caption2)
@@ -212,7 +236,7 @@ struct InsulinView: ChartContent {
             x: .value("Time", date, unit: .second),
             y: .value("Value", yPosition)
         )
-        .symbol { Color.clear.frame(width: 0, height: 0) }
+        .symbolSize(0)
         .annotation(position: .top, alignment: .center, spacing: MainChartHelper.Config.bolusBarSpacing) {
             VStack(spacing: MainChartHelper.Config.bolusAnnotationSpacing) {
                 Text(label)

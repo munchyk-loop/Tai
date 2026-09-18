@@ -29,6 +29,18 @@ struct LoopStatusView: View {
                             .foregroundColor(statusBadgeTextColor)
                             .background(statusBadgeColor)
                             .clipShape(Capsule())
+
+                        Label(state.dosingMode.displayName, systemImage: state.dosingMode.icon)
+                            .font(.subheadline)
+                            .bold()
+
+                        // only meaningful next to an actual determination
+                        if state.determinationsFromPersistence.first != nil, let enactmentSummary {
+                            Text(enactmentSummary)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
 
                     Spacer()
@@ -109,6 +121,12 @@ struct LoopStatusView: View {
             .onAppear {
                 setStatusTitle()
             }
+            // the title is time-relative and the loop can finish while the sheet is open
+            .onChange(of: state.timerDate) { _, _ in setStatusTitle() }
+            .onChange(of: state.determinationsFromPersistence.first?.deliverAt) { _, _ in
+                lastDetermination = state.determinationsFromPersistence.first
+                setStatusTitle()
+            }
             .sheet(isPresented: $isHelpSheetPresented) {
                 LoopStatusHelpView(state: state, helpSheetDetent: $helpSheetDetent, isHelpSheetPresented: $isHelpSheetPresented)
             }
@@ -128,10 +146,28 @@ struct LoopStatusView: View {
         .scrollContentBackground(.hidden)
     }
 
+    /// What the active mode did with this determination. Closed loop needs no caveat.
+    private var enactmentSummary: String? {
+        switch state.dosingMode {
+        case .closed:
+            return nil
+        case .open:
+            return String(localized: "Trio worked this out but did not send anything to your pump.")
+        case .lowGlucoseSuspend:
+            return String(localized: "Trio may only lower your basal. It will not correct a high.")
+        case .basalTesting:
+            return String(localized: "Trio leaves your basal alone unless your glucose goes low.")
+        }
+    }
+
     private var statusBadgeColor: Color {
+        // Open loop enacts nothing, so loop freshness says nothing; report device health, as LoopView does.
+        guard state.dosingMode.automation != .off else {
+            return state.hasDeviceIssue ? .loopRed : .loopGreen
+        }
         guard let determination = state.determinationsFromPersistence.first, determination.timestamp != nil
         else {
-            // previously the .timestamp property was used here because this only gets updated when the reportenacted function in the aps manager gets called
+            // .timestamp only updates when reportEnacted runs
             return .secondary
         }
 
@@ -151,49 +187,40 @@ struct LoopStatusView: View {
 
     private var statusBadgeTextColor: Color {
         if statusBadgeColor == .secondary {
-            .black
+            // black on the grey badge is unreadable in dark mode
+            colorScheme == .dark ? .white : .black
         } else {
             colorScheme == .dark ? Color(red: 25.0 / 255.0, green: 39.0 / 255.0, blue: 53.0 / 255.0, opacity: 1.0) : .white
         }
     }
 
-    private func setStatusTitle() {
-        if let determination = state.determinationsFromPersistence.first, let deliverAt = determination.deliverAt {
-            let minutesAgo = abs(deliverAt.timeIntervalSinceNow) / 60
-
-            if deliverAt < Date().addingTimeInterval(-5 * 60) {
-                let roundedMinutes = Int(minutesAgo.rounded())
-                statusTitle = String(
-                    localized: "Algorithm — not looped in \(roundedMinutes) minutes.",
-                    comment: "Loop status popup title when no recent loop — interpolation is minutes count"
-                )
-            } else {
-                statusTitle = String(
-                    localized: "Algorithm enacted at \(Formatter.dateFormatter.string(from: deliverAt))",
-                    comment: "Loop status popup title when a recent loop has enacted — interpolation is a clock time"
-                )
-            }
-        } else if let determination = lastDetermination, let deliverAt = determination.deliverAt {
-            let minutesAgo = abs(deliverAt.timeIntervalSinceNow) / 60
-
-            if deliverAt < Date().addingTimeInterval(-5 * 60) {
-                let roundedMinutes = Int(minutesAgo.rounded())
-                statusTitle = String(
-                    localized: "Algorithm — not looped in \(roundedMinutes) minutes.",
-                    comment: "Loop status popup title when no recent loop — interpolation is minutes count"
-                )
-            } else {
-                statusTitle = String(
-                    localized: "Algorithm enacted at \(Formatter.dateFormatter.string(from: deliverAt))",
-                    comment: "Loop status popup title when a recent loop has enacted — interpolation is a clock time"
-                )
-            }
-        } else {
-            statusTitle = String(
-                localized: "Not looping.",
-                comment: "Loop-status popup title shown on Home when no determination is available and the loop isn't running"
+    /// Open loop calculates a determination but never sends it, so it was determined, not enacted.
+    private func title(forDeliverAt deliverAt: Date) -> String {
+        guard deliverAt >= Date().addingTimeInterval(-5 * 60) else {
+            let roundedMinutes = Int((abs(deliverAt.timeIntervalSinceNow) / 60).rounded())
+            return String(
+                localized: "Algorithm — not looped in \(roundedMinutes) minutes.",
+                comment: "Loop status popup title when no recent loop — interpolation is minutes count"
             )
         }
+
+        return String(
+            localized: "Algorithm enacted at \(Formatter.dateFormatter.string(from: deliverAt))",
+            comment: "Loop status popup title when a recent loop has enacted — interpolation is a clock time"
+        )
+    }
+
+    private func setStatusTitle() {
+        let determination = state.determinationsFromPersistence.first ?? lastDetermination
+
+        guard let deliverAt = determination?.deliverAt else {
+            statusTitle = state.dosingMode.automation == .off
+                ? String(localized: "No recent determination.")
+                : String(localized: "Not looping.")
+            return
+        }
+
+        statusTitle = title(forDeliverAt: deliverAt)
     }
 
     // TODO: Consolidate all mmol parsing methods (in TagCloudView, NightscoutManager and HomeRootView) to one central func

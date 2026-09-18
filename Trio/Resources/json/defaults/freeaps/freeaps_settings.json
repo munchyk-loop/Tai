@@ -1,6 +1,6 @@
 {
   "units" : "mg/dL",
-  "closedLoop" : false,
+  "dosingMode" : "open",
   "isUploadEnabled" : false,
   "isDownloadEnabled" : false,
   "useLocalGlucoseSource" : false,
@@ -34,8 +34,8 @@
   "xGridLines" : true,
   "yGridLines" : true,
   "hideInsulinBadge" : false,
-  "allowDilution": Bool = false,
-  "insulinConcentration": Decimal = 1,
+  "allowDilution": false,
+  "insulinConcentration": 1,
   "showCobIobChart" : true,
   "rulerMarks" : true,
   "forecastDisplayType": "cone",

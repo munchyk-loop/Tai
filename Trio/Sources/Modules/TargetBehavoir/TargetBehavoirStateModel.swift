@@ -6,6 +6,7 @@ extension TargetBehavoir {
         @Injected() var storage: FileStorage!
 
         @Published var units: GlucoseUnits = .mgdL
+        @Published var dosingMode: DosingMode = .open
         @Published var highTemptargetRaisesSensitivity: Bool = false
         @Published var lowTemptargetLowersSensitivity: Bool = false
         @Published var sensitivityRaisesTarget: Bool = false
@@ -15,6 +16,7 @@ extension TargetBehavoir {
 
         override func subscribe() {
             units = settingsManager.settings.units
+            dosingMode = settingsManager.settings.dosingMode
             autosensMax = scope.preferences.autosensMax
             subscribePreferencesSetting(\.highTemptargetRaisesSensitivity, on: $highTemptargetRaisesSensitivity) {
                 highTemptargetRaisesSensitivity = $0 }
@@ -30,5 +32,6 @@ extension TargetBehavoir {
 extension TargetBehavoir.StateModel: SettingsObserver {
     func settingsDidChange(_: TrioSettings) {
         units = settingsManager.settings.units
+        dosingMode = settingsManager.settings.dosingMode
     }
 }

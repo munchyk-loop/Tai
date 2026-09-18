@@ -152,11 +152,14 @@ extension Home.RootView {
             }
             /// Loop view at bottomLeading
             LoopView(
-                closedLoop: state.closedLoop,
+                dosingMode: state.dosingMode,
                 timerDate: state.timerDate,
                 isLooping: state.isLooping,
                 lastLoopDate: state.lastLoopDate,
                 manualTempBasal: state.manualTempBasal,
+                lastGlucoseDate: state.lastGlucoseDate,
+                lastPumpCommsDate: state.lastPumpCommsDate,
+                hasDeviceIssue: state.hasDeviceIssue,
                 determination: state.determinationsFromPersistence
             )
             .onTapGesture {

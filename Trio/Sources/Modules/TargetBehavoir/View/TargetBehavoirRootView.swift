@@ -55,7 +55,9 @@ extension TargetBehavoir {
                     units: state.units,
                     type: .boolean,
                     label: AlgorithmSettingHints.lowTempTargetLowersSensitivityLabel,
-                    miniHint: AlgorithmSettingHints.lowTempTargetLowersSensitivityMini(units: state.units),
+                    miniHint: state.dosingMode == .basalTesting
+                        ? String(localized: "Basal Testing is on. Low temp targets will not lower sensitivity.")
+                        : AlgorithmSettingHints.lowTempTargetLowersSensitivityMini(units: state.units),
                     verboseHint: AlgorithmSettingHints.lowTempTargetLowersSensitivityVerbose(units: state.units)
                 )
 
