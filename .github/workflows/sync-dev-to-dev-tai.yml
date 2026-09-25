@@ -1,0 +1,33 @@
+name: Sync dev into dev-(TAI)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-dev-into-dev-tai
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge dev into dev-(TAI)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out dev-(TAI)
+        uses: actions/checkout@v7
+        with:
+          ref: dev-(TAI)
+          fetch-depth: 0
+
+      - name: Merge dev into dev-(TAI)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin dev
+          git merge --no-ff --no-edit origin/dev
+
+      - name: Push merge to dev-(TAI)
+        run: git push origin 'HEAD:dev-(TAI)'
