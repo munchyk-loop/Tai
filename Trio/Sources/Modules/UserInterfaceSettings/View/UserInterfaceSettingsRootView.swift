@@ -61,6 +61,8 @@ extension UserInterfaceSettings {
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                                 .lineLimit(nil)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
                                 Spacer()
                                 Button(
                                     action: {
@@ -97,6 +99,7 @@ extension UserInterfaceSettings {
                         }.padding(.bottom)
                     }
                 ).listRowBackground(Color.chart)
+                    .settingsSearchTarget(label: String(localized: "Appearance"))
 
                 Section {
                     VStack {
@@ -116,6 +119,8 @@ extension UserInterfaceSettings {
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
                             Spacer()
                             Button(
                                 action: {
@@ -162,15 +167,16 @@ extension UserInterfaceSettings {
                         }.padding(.top)
                     }.padding(.bottom)
                 }.listRowBackground(Color.chart)
+                    .settingsSearchTarget(label: String(localized: "Glucose Color Scheme"))
 
                 Section(
                     header: Text("Home View Settings"),
                     content: {
                         VStack {
                             Toggle("Show X-Axis Grid Lines", isOn: $state.xGridLines)
-                            Toggle("Show Y-Axis Grid Lines", isOn: $state.yGridLines)
-                            Toggle("Show COB-IOB Chart", isOn: $state.showCobIobChart)
-                            Toggle("Show Glucose Peaks", isOn: $state.showGlucosePeaks)
+                            Toggle("Show Y-Axis Grid Lines", isOn: $state.yGridLines).padding(.top)
+                            Toggle("Show COB-IOB Chart", isOn: $state.showCobIobChart).padding(.top)
+                            Toggle("Show Glucose Peaks", isOn: $state.showGlucosePeaks).padding(.top)
 
                             HStack(alignment: .center) {
                                 Text(
@@ -179,6 +185,8 @@ extension UserInterfaceSettings {
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                                 .lineLimit(nil)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
                                 Spacer()
                                 Button(
                                     action: {
@@ -199,6 +207,7 @@ extension UserInterfaceSettings {
                         }.padding(.vertical)
                     }
                 ).listRowBackground(Color.chart)
+                    .settingsSearchTarget(label: String(localized: "Show X-Axis Grid Lines"))
 
                 Section {
                     VStack(alignment: .leading) {
@@ -218,6 +227,8 @@ extension UserInterfaceSettings {
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
                             Spacer()
                             Button(
                                 action: {
@@ -315,6 +326,8 @@ extension UserInterfaceSettings {
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
                             Spacer()
                             Button(
                                 action: {
@@ -476,6 +489,8 @@ extension UserInterfaceSettings {
                                     "Set low and high glucose values for the main screen, watch app, live activity, and contact image colors."
                                 )
                                 .lineLimit(nil)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
 
@@ -510,6 +525,7 @@ extension UserInterfaceSettings {
                             }.padding(.top)
                         }.padding(.bottom)
                     }.listRowBackground(Color.chart)
+                        .settingsSearchTarget(label: String(localized: "Low Threshold"))
                 }
 
                 Section {
@@ -530,6 +546,8 @@ extension UserInterfaceSettings {
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
                             Spacer()
                             Button(
                                 action: {
@@ -564,7 +582,9 @@ extension UserInterfaceSettings {
                             ).buttonStyle(BorderlessButtonStyle())
                         }.padding(.top)
                     }.padding(.bottom)
-                }.settingsSearchTarget(label: String(localized: "Forecast Display Type"))
+                }
+                .listRowBackground(Color.chart)
+                .settingsSearchTarget(label: String(localized: "Forecast Display Type"))
 
                 Section(
                     header: Text("Trio Statistics"),
@@ -586,6 +606,8 @@ extension UserInterfaceSettings {
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                                 .lineLimit(nil)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
                                 Spacer()
                                 Button(
                                     action: {
@@ -608,6 +630,7 @@ extension UserInterfaceSettings {
                         }.padding(.bottom)
                     }
                 ).listRowBackground(Color.chart)
+                    .settingsSearchTarget(label: String(localized: "eA1c/GMI Display Unit"))
 
                 Section {
                     VStack(alignment: .leading) {
@@ -627,6 +650,8 @@ extension UserInterfaceSettings {
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
                             Spacer()
                             Button(
                                 action: {
@@ -686,7 +711,9 @@ extension UserInterfaceSettings {
                             ).buttonStyle(BorderlessButtonStyle())
                         }.padding(.top)
                     }.padding(.bottom)
-                }.settingsSearchTarget(label: String(localized: "Time in Range Type"))
+                }
+                .listRowBackground(Color.chart)
+                .settingsSearchTarget(label: String(localized: "Time in Range Type"))
 
                 SettingInputSection(
                     decimalValue: $state.carbsRequiredThreshold,

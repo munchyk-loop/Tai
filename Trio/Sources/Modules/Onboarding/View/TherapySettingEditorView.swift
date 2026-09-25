@@ -62,7 +62,7 @@ struct TherapySettingEditorView: View {
                 .padding(.bottom, -10)
 
                 List {
-                    ForEach(Array($items.enumerated()), id: \.element.id) { index, $item in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         let isRounded = roundedIndices.contains(index)
 
                         VStack(spacing: 0) {
@@ -107,16 +107,12 @@ struct TherapySettingEditorView: View {
                                 comment: "Accessibility hint for a schedule entry"
                             ))
                             .accessibilityAction(named: Text("Delete")) {
-                                if let index = items.firstIndex(where: { $0.id == item.id }), items.count > 1 {
-                                    items.remove(at: index)
-                                    selectedItemID = nil
-                                    validateTherapySettingItems()
-                                }
+                                deleteItem(with: item.id)
                             }
 
-                            if selectedItemID == item.id {
+                            if selectedItemID == item.id, let itemBinding = binding(for: item.id) {
                                 timeValuePickerRow(
-                                    item: $item,
+                                    item: itemBinding,
                                     timeOptions: timeOptions,
                                     valueOptions: valueOptions,
                                     unit: unit,
@@ -127,11 +123,9 @@ struct TherapySettingEditorView: View {
                             }
                         }
                         .contextMenu {
-                            if let index = items.firstIndex(where: { $0.id == item.id }), items.count > 1 {
+                            if items.count > 1 {
                                 Button(role: .destructive) {
-                                    items.remove(at: index)
-                                    selectedItemID = nil
-                                    validateTherapySettingItems()
+                                    deleteItem(with: item.id)
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
@@ -139,11 +133,9 @@ struct TherapySettingEditorView: View {
                             }
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            if let itemIndex = items.firstIndex(where: { $0.id == item.id }), items.count > 1 {
+                            if items.count > 1 {
                                 Button(role: .destructive) {
-                                    items.remove(at: itemIndex)
-                                    selectedItemID = nil
-                                    validateTherapySettingItems()
+                                    deleteItem(with: item.id)
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
@@ -188,6 +180,27 @@ struct TherapySettingEditorView: View {
                 })
             }
         }
+    }
+
+    /// Binding to the entry with `id`, resolved on every access so a removed entry cannot trap on a stale index.
+    private func binding(for id: UUID) -> Binding<TherapySettingItem>? {
+        guard items.contains(where: { $0.id == id }) else { return nil }
+
+        return Binding(
+            get: { items.first(where: { $0.id == id }) ?? TherapySettingItem(time: 0, value: 0) },
+            set: { newItem in
+                guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+                items[index] = newItem
+            }
+        )
+    }
+
+    /// Removes the entry with `id`, resolving its index at call time; the last remaining entry is kept.
+    private func deleteItem(with id: UUID) {
+        guard items.count > 1, let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items.remove(at: index)
+        selectedItemID = nil
+        validateTherapySettingItems()
     }
 
     @ViewBuilder private func timeValuePickerRow(
@@ -298,12 +311,12 @@ struct TherapySettingEditorView: View {
             newItems[0] = first
         }
 
-        // force ALL items to have new UUIDs (to enforce binding update)
-        items = newItems.map { TherapySettingItem(copying: $0, newID: true) }
+        // keep IDs stable so in-flight row actions cannot reference a removed entry
+        items = newItems
 
-        // Restore selection by finding the item with the same time value
-        if let selectedTime = selectedTime {
-            selectedItemID = items.first(where: { $0.time == selectedTime })?.id
+        // Restore selection by time value, if the selected item is gone
+        if !items.contains(where: { $0.id == selectedItemID }) {
+            selectedItemID = selectedTime.flatMap { time in items.first(where: { $0.time == time })?.id }
         }
 
         // validates underlying "raw" therapy setting (i.e. item of type basal, target, isf, carb ratio)

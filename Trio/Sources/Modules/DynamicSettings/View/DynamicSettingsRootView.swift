@@ -103,6 +103,8 @@ extension DynamicSettings {
                                     .font(.footnote)
                                     .foregroundColor(miniHintTextColor)
                                     .lineLimit(nil)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
 
                                 Spacer()
                                 Button(
@@ -168,6 +170,7 @@ extension DynamicSettings {
                         }.padding(.bottom)
                     }
                 ).listRowBackground(Color.chart)
+                    .settingsSearchTarget(label: String(localized: "Dynamic ISF"))
 
                 if state.dynamicSensitivityType != .disabled {
                     if state.dynamicSensitivityType == .logarithmic {

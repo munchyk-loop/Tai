@@ -29,8 +29,6 @@ extension Home {
         @State var showTreatments = false
         @State var selectedTab: Int = 0
         @State var lastRealTab: Int = 0
-        // measured x-distance of the dead slot's center from screen center
-        @State var treatmentSlotOffsetX: CGFloat = 0
         @State var showQuickPickTreatmentsPicker = false
         @State var showQuickPickTreatmentsNoHistory = false
         @State var showPumpSelection: Bool = false
@@ -377,12 +375,12 @@ extension Home {
                 .tint(Color.tabBar)
 
                 treatmentButton
-                    // measured slot center; stays at screen center if the probe finds nothing.
-                    // The glass bar dips into the home-indicator inset, so the
-                    // vertical center lies slightly BELOW the safe-area edge.
-                    .offset(x: treatmentSlotOffsetX, y: 6)
+                    // the iOS 26 bar ignores the safe area: on every iPhone its 62pt
+                    // platter floats 21pt above the screen edge; the button is 46pt
+                    .padding(.bottom, 21 + (62 - 46) / 2)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .ignoresSafeArea(.container, edges: .bottom)
             }
-            .background(TabBarSlotProbe { treatmentSlotOffsetX = $0 })
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .blur(radius: state.waitForSuggestion ? 8 : 0)
             .onChange(of: selectedTab) { _, newValue in
@@ -931,78 +929,6 @@ func formatTimeRange(start: String?, end: String?) -> String {
             return "\(startFormatted)-\(endFormatted)"
         } else {
             return ""
-        }
-    }
-}
-
-/// Locates the tab bar's middle button and reports how far its center sits
-/// from screen center, so an overlay can be aligned to the real slot.
-private struct TabBarSlotProbe: UIViewRepresentable {
-    var onResolve: (CGFloat) -> Void
-
-    func makeUIView(context _: Context) -> ProbeView {
-        let view = ProbeView()
-        view.onResolve = onResolve
-        return view
-    }
-
-    func updateUIView(_ uiView: ProbeView, context _: Context) {
-        uiView.scheduleResolve()
-    }
-
-    final class ProbeView: UIView {
-        var onResolve: ((CGFloat) -> Void)?
-        private var attempts = 0
-        // Measure exactly once: the iOS 26 bar minimizes and shifts during
-        // use, and re-measuring made the overlaid button wander with it.
-        private var hasResolved = false
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            guard !hasResolved else { return }
-            attempts = 0
-            scheduleResolve()
-        }
-
-        func scheduleResolve() {
-            guard !hasResolved else { return }
-            DispatchQueue.main.async { [weak self] in self?.resolve() }
-        }
-
-        private func resolve() {
-            guard !hasResolved, let window else { return }
-            guard let offset = Self.middleSlotOffset(in: window) else {
-                // the bar may not be laid out yet; retry briefly
-                attempts += 1
-                if attempts < 10 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.resolve() }
-                }
-                return
-            }
-            hasResolved = true
-            onResolve?(offset)
-        }
-
-        private static func middleSlotOffset(in window: UIWindow) -> CGFloat? {
-            var buttons: [UIView] = []
-            collectTabButtons(in: window, into: &buttons)
-            guard buttons.count == 5 else { return nil }
-            buttons.sort { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
-            let slotCenterX = buttons[2].convert(buttons[2].bounds, to: window).midX
-            return slotCenterX - window.bounds.midX
-        }
-
-        private static func collectTabButtons(in view: UIView, into buttons: inout [UIView]) {
-            // iOS 26 items are _UITabButton; the classic bar uses UITabBarButton
-            if String(describing: type(of: view)).contains("TabButton") ||
-                String(describing: type(of: view)).contains("TabBarButton")
-            {
-                buttons.append(view)
-                return
-            }
-            for subview in view.subviews {
-                collectTabButtons(in: subview, into: &buttons)
-            }
         }
     }
 }

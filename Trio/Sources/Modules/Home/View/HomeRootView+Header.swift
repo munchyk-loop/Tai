@@ -172,29 +172,24 @@ extension Home.RootView {
     }
 
     var basalString: String? {
-        var rate: NSNumber = 0
+        let rate: Decimal
         var manualBasalString = ""
 
-        guard let apsManager = state.apsManager else {
+        switch state.activeBasalDelivery {
+        case .none:
             return nil
-        }
-
-        if apsManager.isScheduledBasal == true {
-            guard let scheduledRate = scheduledBasalDeliveryRate(at: Date()) else {
-                return nil
-            }
-            rate = scheduledRate
-        } else {
-            guard let lastTempBasal = state.tempBasals.last?.tempBasal, let tempRate = lastTempBasal.rate else {
-                return nil
-            }
-            if apsManager.isManualTempBasal {
+        case .suspended:
+            rate = 0
+        case let .temp(tempRate):
+            if state.manualTempBasal {
                 manualBasalString = String(
                     localized: " ⚠️",
                     comment: "Manual Temp basal"
                 )
             }
             rate = tempRate
+        case let .scheduled(scheduledRate):
+            rate = scheduledRate
         }
         let rateString = Formatter.insulinFormatterToIncrement(for: state.bolusIncrement)
             .string(from: rate as NSNumber) ?? "0"
@@ -202,20 +197,9 @@ extension Home.RootView {
             manualBasalString
     }
 
-    // Returns the scheduled basal rate for the current time based on the saved basal scheduled.
-    // Would be better if in the future BasalDeliveryStatus could be updated to include this info.
-    func scheduledBasalDeliveryRate(at when: Date) -> NSNumber? {
-        let calendar = Calendar(identifier: .gregorian)
-        // calendar.timeZone = timeZone /// should come from pumpManager in case it's different!
-
-        let hours = calendar.component(.hour, from: when)
-        let minutes = calendar.component(.minute, from: when)
-        let totalMinutes = hours * 60 + minutes
-
-        if let rate = findBasalRateForOffset(for: totalMinutes, in: state.basalProfile) {
-            return NSDecimalNumber(decimal: rate)
-        }
-        return nil
+    var isDeliveringScheduledBasal: Bool {
+        if case .scheduled = state.activeBasalDelivery { return true }
+        return false
     }
 
     @ViewBuilder func leftHeaderPanel() -> some View {
@@ -299,7 +283,7 @@ extension Home.RootView {
                             )
                         if let basalString = self.basalString {
                             /// Adjust opacity when displaying a scheduled basal rate
-                            let opacity = apsManager.isScheduledBasal == true ? 0.6 : 1.0
+                            let opacity = isDeliveringScheduledBasal ? 0.6 : 1.0
                             if basalString.count > 5 {
                                 Text(basalString)
                                     .font(.callout).fontWeight(.bold).fontDesign(.rounded)
