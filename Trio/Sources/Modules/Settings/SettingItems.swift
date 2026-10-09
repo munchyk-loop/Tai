@@ -122,6 +122,8 @@ enum SettingItems {
                 "Swissalpine",
                 "Datafield Selection",
                 "Disable Watchface Data",
+                "Enable Watch Commands",
+                "Allow Bolus Commands",
                 "Data Choice 1",
                 "Data Choice 2",
                 "COB",
@@ -555,7 +557,8 @@ enum SettingItems {
             view: .nighscoutConfig,
             searchContents: [
                 "Allow Uploading to Nightscout",
-                "Upload Glucose"
+                "Upload Glucose",
+                "Upload CGM Sensor States"
             ],
             path: ["Services", "Nightscout", "Upload"]
         ),

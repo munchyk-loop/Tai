@@ -313,7 +313,7 @@ struct DecimalPickerSettings {
     )
     var iobThresholdPercent = PickerSetting(
         value: 1,
-        step: 0.1,
+        step: 0.01,
         min: 0,
         max: 1,
         type: PickerSetting.PickerSettingType

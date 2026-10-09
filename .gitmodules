@@ -25,9 +25,6 @@
 [submodule "DanaKit"]
 	path = DanaKit
 	url = https://github.com/loopandlearn/DanaKit
-[submodule "MinimedKit"]
-	path = MinimedKit
-	url = https://github.com/loopandlearn/MinimedKit.git
 [submodule "MedtrumKit"]
 	path = MedtrumKit
 	url = https://github.com/loopandlearn/MedtrumKit
@@ -40,14 +37,14 @@
 [submodule "EversenseKit"]
 	path = EversenseKit
 	url = https://github.com/loopandlearn/EversenseKit
-[submodule "LibreCRKit"]
-	path = LibreCRKit
-	url = https://github.com/loopandlearn/LibreCRKit.git
-	branch = trio
+[submodule "RoundWhiteDiscKit"]
+	path = RoundWhiteDiscKit
+	url = https://github.com/loopandlearn/RoundWhiteDiscKit.git
+	branch = main
 [submodule "LibreLoop"]
 	path = LibreLoop
 	url = https://github.com/loopandlearn/LibreLoop.git
-	branch = trio
+	branch = legacy-loopkit-compat
 [submodule "LoopAlgorithm"]
 	path = LoopAlgorithm
 	url = https://github.com/loopandlearn/LoopAlgorithm.git

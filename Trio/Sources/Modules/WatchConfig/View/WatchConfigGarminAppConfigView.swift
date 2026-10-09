@@ -7,6 +7,8 @@ struct WatchConfigGarminAppConfigView: View {
     @State private var shouldDisplayHint2: Bool = false
     @State private var shouldDisplayHint3: Bool = false
     @State private var shouldDisplayHint4: Bool = false
+    @State private var shouldDisplayCommandsHint: Bool = false
+    @State private var shouldDisplayBolusCommandsHint: Bool = false
     @State var hintDetent = PresentationDetent.large
     @State private var shouldShowWatchfaceSwitchConfirmDialog: Bool = false
 
@@ -82,6 +84,69 @@ struct WatchConfigGarminAppConfigView: View {
                             Button(
                                 action: {
                                     shouldDisplayHint2.toggle()
+                                },
+                                label: {
+                                    HStack {
+                                        Image(systemName: "questionmark.circle").accessibilityLabel(Text("More information"))
+                                    }
+                                }
+                            ).buttonStyle(BorderlessButtonStyle())
+                        }.padding(.top)
+                    }.padding(.bottom)
+                }
+            ).listRowBackground(Color.chart)
+
+            // MARK: - Commands Section
+
+            Section(
+                header: Text("Commands"),
+                content: {
+                    VStack {
+                        Toggle("Enable Watch Commands", isOn: Binding(
+                            get: { state.garminSettings.isCommandControlEnabled },
+                            set: { state.setCommandControlEnabled($0) }
+                        ))
+
+                        HStack(alignment: .center) {
+                            Text(
+                                "Allow the Garmin app to log carbs and start or stop overrides and temp targets."
+                            )
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button(
+                                action: {
+                                    shouldDisplayCommandsHint.toggle()
+                                },
+                                label: {
+                                    HStack {
+                                        Image(systemName: "questionmark.circle").accessibilityLabel(Text("More information"))
+                                    }
+                                }
+                            ).buttonStyle(BorderlessButtonStyle())
+                        }.padding(.top)
+                    }.padding(.bottom)
+
+                    VStack {
+                        Toggle("Allow Bolus Commands", isOn: $state.garminSettings.isBolusCommandEnabled)
+                            .disabled(!state.garminSettings.isCommandControlEnabled)
+
+                        HStack(alignment: .center) {
+                            Text(
+                                "Allow the Garmin app to deliver insulin. Requires watch commands to be enabled."
+                            )
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .lineLimit(nil)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button(
+                                action: {
+                                    shouldDisplayBolusCommandsHint.toggle()
                                 },
                                 label: {
                                     HStack {
@@ -231,6 +296,41 @@ struct WatchConfigGarminAppConfigView: View {
                 shouldDisplayHint: $shouldDisplayHint1,
                 hintLabel: "Choose Garmin Watchface",
                 hintText: watchfaceHintText,
+                sheetTitle: String(localized: "Help", comment: "Help sheet title")
+            )
+        }
+        .sheet(isPresented: $shouldDisplayCommandsHint) {
+            SettingInputHintView(
+                hintDetent: $hintDetent,
+                shouldDisplayHint: $shouldDisplayCommandsHint,
+                hintLabel: String(localized: "Enable Watch Commands"),
+                hintText: VStack(alignment: .leading, spacing: 10) {
+                    Text("Default: OFF").bold()
+                    Text(
+                        "Lets a supported Garmin app log carbs and start or stop override and temp target presets. Status and the preset list stay available with this switch off."
+                    )
+                    Text(
+                        "Commands are only accepted from the Garmin apps selected above, must reach the phone within 2 minutes of being confirmed on the watch, and carbs are limited by your Max Carbs setting."
+                    )
+                },
+                sheetTitle: String(localized: "Help", comment: "Help sheet title")
+            )
+        }
+        .sheet(isPresented: $shouldDisplayBolusCommandsHint) {
+            SettingInputHintView(
+                hintDetent: $hintDetent,
+                shouldDisplayHint: $shouldDisplayBolusCommandsHint,
+                hintLabel: String(localized: "Allow Bolus Commands"),
+                hintText: VStack(alignment: .leading, spacing: 10) {
+                    Text("Default: OFF").bold()
+                    Text(
+                        "Lets the Garmin app deliver a bolus, alone or together with carbs, without any confirmation on this phone."
+                    )
+                    Text(
+                        "Every bolus is checked against your Max Bolus and Max IOB. A watch bolus is refused for 6 minutes after the previous watch bolus, and any watch bolus is refused if the boluses of the last 6 minutes (SMBs included) add up to 20% or more of it. These checks cannot tell who pressed the button on the watch: anyone with access to your watch can deliver insulin up to those limits."
+                    )
+                    Text("Only enable this if you keep your watch locked and under your control.").bold()
+                },
                 sheetTitle: String(localized: "Help", comment: "Help sheet title")
             )
         }
