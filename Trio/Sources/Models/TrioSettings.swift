@@ -89,11 +89,13 @@ struct TrioSettings: JSON, Equatable, Encodable {
     var useLiveActivity: Bool = false
     var lockScreenView: LockScreenView = .simple
     var smartStackView: LockScreenView = .simple
+    var liveActivitySimpleFontSize: LiveActivityFontSize = .large
     var displayGlucoseForecasts: Bool = false
     var bolusShortcut: BolusShortcutLimit = .notAllowed
     var timeInRangeType: TimeInRangeType = .timeInTightRange
     var showGlucosePeaks: Bool = false
     var useChartBars: Bool = true
+    var homeStatsPanelRange: HomeStatsPanelRange = .today
     var requireAdjustmentsConfirmation: Bool = false
     var showCgmSensorStatus: Bool = true
 
@@ -400,6 +402,12 @@ extension TrioSettings: Decodable {
             settings.smartStackView = smartStackView
         }
 
+        if let liveActivitySimpleFontSize = try? container
+            .decode(LiveActivityFontSize.self, forKey: .liveActivitySimpleFontSize)
+        {
+            settings.liveActivitySimpleFontSize = liveActivitySimpleFontSize
+        }
+
         if let displayGlucoseForecasts = try? container.decode(Bool.self, forKey: .displayGlucoseForecasts) {
             settings.displayGlucoseForecasts = displayGlucoseForecasts
         }
@@ -418,6 +426,10 @@ extension TrioSettings: Decodable {
 
         if let useChartBars = try? container.decode(Bool.self, forKey: .useChartBars) {
             settings.useChartBars = useChartBars
+        }
+
+        if let homeStatsPanelRange = try? container.decode(HomeStatsPanelRange.self, forKey: .homeStatsPanelRange) {
+            settings.homeStatsPanelRange = homeStatsPanelRange
         }
 
         if let requireAdjustmentsConfirmation = try? container.decode(Bool.self, forKey: .requireAdjustmentsConfirmation) {

@@ -51,6 +51,7 @@ final class BaseUserNotificationsManager: NSObject, UserNotificationsManager, In
         super.init()
         notificationCenter.delegate = self
         injectServices(resolver)
+        broadcaster.register(SettingsObserver.self, observer: self)
 
         coreDataPublisher =
             CoreDataStack.shared.entityChangePublisher
@@ -396,5 +397,11 @@ extension BaseUserNotificationsManager: UNUserNotificationCenterDelegate {
                 )
             }
         }
+    }
+}
+
+extension BaseUserNotificationsManager: SettingsObserver {
+    func settingsDidChange(_: TrioSettings) {
+        Task { await updateGlucoseBadge() }
     }
 }

@@ -437,7 +437,8 @@ enum SettingItems {
                 "Require Adjustments Confirmation",
                 "Show CGM Status Around Bobble",
                 "CGM Status",
-                "Bobble"
+                "Bobble",
+                "Home Statistics Range"
             ],
             scrollTargetLabels: [
                 "Show Y-Axis Grid Lines": "Show X-Axis Grid Lines",
@@ -525,7 +526,8 @@ enum SettingItems {
             view: .liveActivitySettings,
             searchContents: [
                 "Enable Live Activity",
-                "Lock Screen Widget Style"
+                "Lock Screen Widget Style",
+                "Widget Configuration"
             ],
             path: ["Notifications", "Live Activity"]
         ),

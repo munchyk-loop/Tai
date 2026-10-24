@@ -14,6 +14,7 @@ extension History {
         @ObservationIgnored @Injected() var glucoseStorage: GlucoseStorage!
         @ObservationIgnored @Injected() var healthKitManager: HealthKitManager!
         @ObservationIgnored @Injected() var carbsStorage: CarbsStorage!
+        @ObservationIgnored @Injected() var carbEntryMutationService: CarbEntryMutationService!
 
         var mode: Mode = .treatments
         var treatments: [Treatment] = []
