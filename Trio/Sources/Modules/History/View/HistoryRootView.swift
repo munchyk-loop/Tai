@@ -371,7 +371,6 @@ extension History {
             // Convert Pump Events to TreatmentItem with filtering
             let treatments = pumpEventStored.compactMap { event -> TreatmentItem? in
                 guard let id = event.objectID as NSManagedObjectID? else {
-                    print("🚨 PumpEventStored has nil objectID") // Debugging
                     return nil
                 }
 
@@ -411,7 +410,6 @@ extension History {
             // Convert Carb Entries to TreatmentItem with filtering
             let meals = carbEntryStored.compactMap { meal -> TreatmentItem? in
                 guard let id = meal.objectID as NSManagedObjectID? else {
-                    print("🚨 CarbEntryStored has nil objectID") // Debugging
                     return nil
                 }
 
@@ -974,6 +972,16 @@ extension History {
                     .foregroundColor(.secondary)
                     if bolus.isExternal {
                         Text(String(localized: "External", comment: "External Insulin")).foregroundColor(.secondary)
+                    }
+                    if bolus.isProgrammedByPumpUI {
+                        Image(systemName: "keyboard.onehanded.left")
+                            .foregroundColor(.secondary)
+                            .accessibilityLabel(
+                                String(
+                                    localized: "Programmed on pump",
+                                    comment: "Accessibility label for bolus programmed on the pump itself"
+                                )
+                            )
                     }
                 } else if let tempBasal = item.tempBasal, let rate = tempBasal.rate {
                     Image(systemName: "circle.fill")

@@ -16,6 +16,7 @@
   "dura_ISFratio" : 1,
   "dura_avg" : 1,
   "dura_min" : 1,
+  "duration" : 30,
   "eventualBG" : 125,
   "expectedDelta" : -3.9,
   "id" : "00000000-0000-0000-0000-000000000000",
@@ -166,7 +167,8 @@
       98
     ]
   },
-  "reason" : "Ins.Req:, 0.4, SMB Del.Ratio:, 0.5, autosens:, 1.15, autoISF disabled, Standard, COB: 0, Dev: 56, BGI: -4, CR: 12, Target: 95, minPredBG 114, minGuardBG 125, IOBpredBG 104, UAMpredBG 125, Dynamic ISF: On, Sigmoid function, AF: 0.6, Basal ratio: 1.01; Eventual BG 125 >= 95,  insulinReq 0.4; setting 30m low temp of 0.87U/h. Microbolusing 0.2U.  30m left and 0.75 ~ req 0.875U/hr: no temp required",
+  "rate" : 0.025,
+  "reason" : "Ins.Req:, 0.4, SMB Del.Ratio:, 0.5, autosens:, 1.15, autoISF disabled, Standard, COB: 0, Dev: 56, BGI: -4, CR: 12, Target: 95, minPredBG 114, minGuardBG 125, IOBpredBG 104, UAMpredBG 125, Dynamic ISF: On, Sigmoid function, AF: 0.6, Basal ratio: 1.01; Eventual BG 125 >= 95,  insulinReq 0.4; setting 30m low temp of 0.03U/h. Microbolusing 0.2U. ",
   "received" : false,
   "sensitivityRatio" : 1.152552507138643740284,
   "temp" : "absolute",
