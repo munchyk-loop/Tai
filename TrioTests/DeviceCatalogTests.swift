@@ -6,11 +6,24 @@ import MedtrumKit
 import MinimedKit
 import ObjectiveC
 import OmnipodKit
+import TandemKit
 import Testing
 @testable import Trio
 import UIKit
 
 @Suite("Device Catalog Tests") struct DeviceCatalogTests {
+    /// Persisted `pluginIdentifier` per CGM manager type; LoopKit only exposes it per instance.
+    private static let cgmPluginIdentifiers = [
+        "LibreTransmitterManagerV3": "LibreTransmitterManagerV3",
+        "LibreLoopCGMManager": "LibreLoopCGMManager",
+        "G5CGMManager": "DexG5Transmitter",
+        "G6CGMManager": "DexG6Transmitter",
+        "G7CGMManager": "G7CGMManager",
+        "AccuChekCgmManager": "AccuChek",
+        "EversenseCGMManager": "EversenseKit",
+        "SyaiCGMManager": "SyaiCGMManager"
+    ]
+
     // MARK: - Integrity
 
     @Test("Catalog identifiers are unique") func testIdentifiersAreUnique() {
@@ -21,12 +34,19 @@ import UIKit
         #expect(Set(pumpIDs).count == pumpIDs.count, "Duplicate pump identifier in catalog: \(pumpIDs)")
     }
 
-    @Test("Pump entry ids match their manager's plugin identifier") func testPumpIdentifiersMatchManagers() {
+    /// LoopKit only exposes `pluginIdentifier` per instance, so the catalog states it; these are persisted values.
+    @Test("Pump entry ids are their manager's persisted plugin identifier") func testPumpIdentifiersMatchManagers() {
+        let expected = [
+            "OmniPumpManager": "Omni",
+            "MinimedPumpManager": "Minimed500",
+            "MedtrumPumpManager": "Medtrum",
+            "DanaKitPumpManager": "Dana",
+            "TandemPumpManager": "TandemPumpManager",
+            "MockPumpManager": "MockPumpManager"
+        ]
         for entry in DeviceCatalog.pumps {
-            #expect(
-                entry.id == entry.manager.pluginIdentifier,
-                "\(entry.name) id \(entry.id) != \(entry.manager.pluginIdentifier)"
-            )
+            let manager = String(describing: entry.manager)
+            #expect(entry.id == expected[manager], "\(manager) id \(entry.id) != \(expected[manager] ?? "nil")")
         }
     }
 
@@ -65,7 +85,7 @@ import UIKit
         for entry in DeviceCatalog.cgms {
             if entry.managerType != nil {
                 #expect(entry.cgmType == .plugin, "\(entry.name) is manager-backed so it must persist as .plugin")
-                #expect(entry.id == entry.managerType?.pluginIdentifier)
+                #expect(entry.id == entry.managerType.flatMap { Self.cgmPluginIdentifiers[String(describing: $0)] })
             } else {
                 #expect(entry.cgmType.rawValue == entry.id, "\(entry.name) id must be its CGMType raw value")
             }
@@ -256,7 +276,9 @@ import UIKit
             "MiniMed": BasalRateCapability(minimum: 0.05, maximum: 35, step: 0.05),
             // Dana delivers in 0.01 steps; Trio previously offered 0.05.
             "Dana": BasalRateCapability(minimum: 0.01, maximum: 3, step: 0.01),
-            "Medtrum Nano": BasalRateCapability(minimum: 0.05, maximum: 30, step: 0.05)
+            "Medtrum Nano": BasalRateCapability(minimum: 0.05, maximum: 30, step: 0.05),
+            // Mobi declares 0 plus 0.1-15.0; 0 is dropped, so the picker starts at 0.1.
+            "Tandem": BasalRateCapability(minimum: 0.1, maximum: 15, step: 0.01)
         ]
         for (name, capability) in expected {
             let entry = DeviceCatalog.pumps.first { $0.name == name }
@@ -271,7 +293,9 @@ import UIKit
             "Omnipod": OmniPumpManager.onboardingSupportedBasalRates,
             "MiniMed": MinimedPumpManager.onboardingSupportedBasalRates,
             "Dana": DanaKitPumpManager.onboardingSupportedBasalRates,
-            "Medtrum Nano": MedtrumPumpManager.onboardingSupportedBasalRates
+            "Medtrum Nano": MedtrumPumpManager.onboardingSupportedBasalRates,
+            // Tandem's grid declares 0 alongside 0.1-15.0; the picker drops it, so check what it keeps.
+            "Tandem": TandemPumpManager.onboardingSupportedBasalRates.filter { $0 > 0 }
         ]
         for (name, grid) in grids {
             #expect(BasalRateCapability.isUniform(grid), "\(name) onboarding grid is not evenly spaced")
@@ -291,7 +315,8 @@ import UIKit
 
     @Test("Only tubed pumps report a rewind") func testRewindReporting() {
         // rewindResetsAutosens is only meaningful for pumps with a reservoir to rewind.
-        let expected = ["Omnipod": false, "MiniMed": true, "Dana": true, "Medtrum Nano": false]
+        // Mobi is tubed: TandemKit reports a cartridge change as a `.rewind` pump event.
+        let expected = ["Omnipod": false, "MiniMed": true, "Dana": true, "Medtrum Nano": false, "Tandem": true]
         for (name, reports) in expected {
             let entry = DeviceCatalog.pumps.first { $0.name == name }
             #expect(entry?.reportsRewindEvents == reports, "\(name) rewind behaviour changed")

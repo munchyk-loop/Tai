@@ -117,6 +117,8 @@ struct EditOverrideForm: View {
                 saveButton
             }
             .listSectionSpacing(10)
+            // iOS's default on iPhone; iPhone Duo defaults to 0, which put the first row under the sheet's bar
+            .contentMargins(.top, 35, for: .scrollContent)
             .padding(.top, 30)
             .ignoresSafeArea(edges: .top)
             .scrollContentBackground(.hidden)
@@ -175,7 +177,7 @@ struct EditOverrideForm: View {
                 HStack {
                     Text("Basal Rate Adjustment")
                     Spacer()
-                    Text("\(percentage.formatted(.number)) %")
+                    Text((percentage / 100).formatted(.wholePercent))
                         .foregroundColor(!displayPickerPercentage ? .primary : .accentColor)
                         .onTapGesture {
                             displayPickerPercentage = toggleScrollWheel(displayPickerPercentage)
@@ -188,7 +190,7 @@ struct EditOverrideForm: View {
                         VStack(alignment: .leading) {
                             // Radio buttons for step iteration
                             ForEach([1, 5], id: \.self) { step in
-                                RadioButton(isSelected: percentageStep == step, label: "\(step) %") {
+                                RadioButton(isSelected: percentageStep == step, label: step.formatted(.percent)) {
                                     percentageStep = step
                                     percentage = Adjustments.StateModel.roundOverridePercentageToStep(percentage, step)
                                 }
@@ -212,7 +214,7 @@ struct EditOverrideForm: View {
                                 )),
                                 id: \.self
                             ) { percent in
-                                Text("\(Int(percent)) %").tag(percent)
+                                Text((percent / 100).formatted(.wholePercent)).tag(percent)
                             }
                         }
                         .pickerStyle(WheelPickerStyle())
@@ -482,7 +484,7 @@ struct EditOverrideForm: View {
                     HStack {
                         Text("Duration")
                         Spacer()
-                        Text(state.formatHoursAndMinutes(Int(truncating: duration as NSNumber)))
+                        Text(Duration(minutes: duration).formattedTimeSpan())
                             .foregroundColor(!displayPickerDuration ? .primary : .accentColor)
                             .onTapGesture {
                                 displayPickerDuration = toggleScrollWheel(displayPickerDuration)

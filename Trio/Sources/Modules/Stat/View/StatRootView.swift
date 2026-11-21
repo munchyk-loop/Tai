@@ -18,6 +18,7 @@ extension Stat {
         @State var state = StateModel()
         @State private var selectedView: StateModel.StatisticViewType = .glucose
         @State private var isGlucoseDaySelected: Bool = false
+        @State private var showExportMenu = false
 
         private var intervalOptions: [Stat.StateModel.StatsTimeIntervalWithToday] {
             state.selectedGlucoseChartType == .percentileByDay || state.selectedGlucoseChartType == .distributionByDay
@@ -68,6 +69,14 @@ extension Stat {
                             .foregroundColor(.tabBar)
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: { showExportMenu = true }) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+            }
+            .sheet(isPresented: $showExportMenu) {
+                StatExportMenuView(state: state)
             }
         }
 
@@ -116,7 +125,7 @@ extension Stat {
                     StatCard {
                         GRIExplanationView(result: GRICalculator.calculate(
                             glucoseValues: state.glucoseFromPersistence.map { Int($0.glucose) }
-                        ))
+                        ), units: state.units)
                     }
                 } else {
                     if !isGlucoseDaySelected && state.selectedGlucoseChartType != .percentileByDay && state
@@ -201,7 +210,7 @@ extension Stat {
                     case .glycemiaRiskIndex:
                         GRIChartView(result: GRICalculator.calculate(
                             glucoseValues: state.glucoseFromPersistence.map { Int($0.glucose) }
-                        ))
+                        ), units: state.units)
 
                     case .percentileByTime:
                         GlucosePercentileChart(

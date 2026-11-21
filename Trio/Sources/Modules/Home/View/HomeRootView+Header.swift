@@ -113,8 +113,7 @@ extension Home.RootView {
                     .foregroundColor(.loopGreen)
                 let isfValue = state.enactedAndNonEnactedDeterminations.first?.insulinSensitivity ?? NSDecimalNumber.zero
                 let isfValueDecimal = isfValue.decimalValue
-                let convertedISF = state.units == .mgdL ? isfValueDecimal.description : isfValueDecimal
-                    .formattedAsMmolL
+                let convertedISF = isfValueDecimal.formattedISF(for: state.units)
                 Text(convertedISF)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
 //                    Text("\(state.units.rawValue)/U")
@@ -129,13 +128,13 @@ extension Home.RootView {
                         "⇢"
                     ).font(.system(size: 18, weight: .bold))
                         .foregroundColor(.secondary)
-                    Text(state.units == .mgdL ? eventualGlucose.description : eventualGlucose.formattedAsMmolL)
+                    Text(eventualGlucose.formatted(for: state.units))
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text("Eventual glucose"))
                 .accessibilityValue(Text(
-                    (state.units == .mgdL ? eventualGlucose.description : eventualGlucose.formattedAsMmolL)
+                    eventualGlucose.formatted(for: state.units)
                         + " " + state.units.spokenValue
                 ))
             } else {
@@ -253,9 +252,9 @@ extension Home.RootView {
             ))
             HStack {
                 /// Only display the insulin delivery rate info if the pump is not
-                /// suspended and is available (e.g., pod is paired & not faulted).
+                /// suspended and is available (paired and reporting a display state).
                 if let apsManager = state.apsManager {
-                    let pumpAvailable = apsManager.isScheduledBasal != nil
+                    let pumpAvailable = state.pumpDisplayState != nil
                     if apsManager.isSuspended {
                         Image(systemName: "chart.bar.xaxis")
                             .font(.system(size: 16))
